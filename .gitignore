@@ -1,0 +1,10 @@
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+*.pem
+*.key
+*.crt
+aws.json
+aws-credentials.json
