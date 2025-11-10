@@ -1,3 +1,4 @@
+
 require("dotenv").config();
 const express = require("express");
 const helmet = require("helmet");
@@ -6,10 +7,8 @@ const rateLimit = require("express-rate-limit");
 const morgan = require("morgan");
 const connectDB = require("./config/db");
 const { errorHandler } = require("./middlewares/errorHandler");
-
 // ===== Routes =====
-const authRoutes = require("./routes/auth");
-const productRoutes = require("./routes/product");
+
 
 const app = express();
 
@@ -75,7 +74,7 @@ app.use(
       return callback(new Error("Not allowed by CORS"));
     },
     credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allowedHeaders: ["Content-Type", "Authorization"],
     preflightContinue: false,
     optionsSuccessStatus: 200,
@@ -94,10 +93,18 @@ const limiter = rateLimit({
   message: "Too many requests from this IP. Please try again later.",
 });
 app.use(limiter);
+app.set("trust proxy", false);
+
 
 // ==================================================
 // ✅ ROUTES (keep BEFORE error handler)
 // ==================================================
+const authRoutes = require("./routes/auth");
+const productRoutes = require("./routes/product");
+const cmsRoutes = require("./routes/cmsRoutes");
+
+
+app.use("/api/cms-content", cmsRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes); // ✅ moved above errorHandler
 
