@@ -4,7 +4,7 @@ const multer = require("multer");
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const crypto = require("crypto");
 const path = require("path");
-const Product = require("../models/Product");
+const Product = require("../models/product");
 
 // ==================================================
 // ✅ AWS CONFIG
