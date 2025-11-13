@@ -175,6 +175,34 @@ exports.verifiedEmailTemplate = (name) =>
   `
   );
 
+  // ========================================================
+// 👑 5. SUPERADMIN OTP TEMPLATE
+// ========================================================
+exports.superAdminOTPTemplate = (name, otp, type = "login") =>
+  baseLayout(
+    type === "register"
+      ? "SuperAdmin Registration Verification"
+      : "SuperAdmin Login Verification",
+    `
+    <h2 style="color:${brand.colorGold};">Hello ${name || "SuperAdmin"},</h2>
+    <p>We’ve received a ${type === "register" ? "registration" : "login"} request for your <strong>SuperAdmin</strong> account on ${brand.name}.</p>
+    <p>Please use the verification code below to ${type === "register" ? "complete your registration" : "log in"} securely:</p>
+    
+    <div class="otp-box">${otp}</div>
+
+    <p>This code will expire in <strong>5 minutes</strong>. For your safety, do not share it with anyone.</p>
+
+    <div class="divider"></div>
+    <p style="font-size:15px; color:#bbb;">
+      Need assistance? Contact the internal support team or report any suspicious activity immediately.
+    </p>
+    <a href="${brand.url}/admin" class="btn">Go to Admin Panel</a>
+    <div class="divider"></div>
+    <p style="color:#aaa;">Secured by <strong>${brand.name} Admin Systems</strong> — Trusted Access Management.</p>
+  `
+  );
+
+
 // ========================================================
 // 🛍️ 4. ORDER CONFIRMATION EMAIL TEMPLATE
 // ========================================================

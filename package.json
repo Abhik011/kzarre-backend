@@ -30,5 +30,13 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs"
+  "type": "commonjs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Abhik011/kzarre-backend.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Abhik011/kzarre-backend/issues"
+  },
+  "homepage": "https://github.com/Abhik011/kzarre-backend#readme"
 }

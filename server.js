@@ -102,11 +102,15 @@ app.set("trust proxy", false);
 const authRoutes = require("./routes/auth");
 const productRoutes = require("./routes/product");
 const cmsRoutes = require("./routes/cmsRoutes");
+const adminUserRoutes = require("./routes/adminUserRoutes");
+const superAdminRoutes = require("./routes/superAdmin");
 
 
+app.use("/api/superadmin", superAdminRoutes);
 app.use("/api/cms-content", cmsRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes); // ✅ moved above errorHandler
+app.use("/api/usersadmin", adminUserRoutes);
 
 // ==================================================
 // ✅ ROOT TEST ROUTE

@@ -1,0 +1,52 @@
+name: Deploy to Elastic Beanstalk
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18' # or match your EB platform
+
+      - name: Install dependencies & build
+        run: |
+          npm ci
+          npm run build   # if your app needs build step
+
+      - name: Create source bundle
+        run: |
+          zip -r eb-deploy.zip . -x node_modules/**\* .git/**\* .github/**\*
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload bundle to S3
+        run: |
+          aws s3 cp eb-deploy.zip s3://${{ secrets.S3_BUCKET }}/eb-deploy-$(date +%s).zip
+        id: upload
+
+      - name: Deploy to Elastic Beanstalk
+        uses: einaregilsson/beanstalk-deploy@v20
+        with:
+          aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          region: ${{ secrets.AWS_REGION }}
+          application_name: ${{ secrets.EB_APP_NAME }}
+          environment_name: ${{ secrets.EB_ENV_NAME }}
+          version_label: github-${{ github.sha }}
+          bucket_name: ${{ secrets.S3_BUCKET }}
+          bucket_key: eb-deploy-$(date +%s).zip
