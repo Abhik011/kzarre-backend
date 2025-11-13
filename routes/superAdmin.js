@@ -6,6 +6,9 @@ const { superAdminOTPTemplate } = require("../utils/emailTemplates");
 
 const router = express.Router();
 
+router.get("/status", (req, res) => {
+  return res.json({ status: "ok" });
+});
 // ============================================================
 // 🔢 Generate random 6-digit OTP
 // ============================================================
