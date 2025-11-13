@@ -1,3 +1,4 @@
+
 require("dotenv").config();
 const express = require("express");
 const helmet = require("helmet");
@@ -6,30 +7,32 @@ const rateLimit = require("express-rate-limit");
 const morgan = require("morgan");
 const connectDB = require("./config/db");
 const { errorHandler } = require("./middlewares/errorHandler");
+// ===== Routes =====
+
 
 const app = express();
 
-/* ================================================
-   ✅ TRUST PROXY — MUST BE FIRST
-================================================ */
-app.set("trust proxy", 1);  // Proxy chain (Render/NGINX/Cloudflare)
-
-/* ================================================
-   ✅ CONNECT DATABASE
-================================================ */
+// ==================================================
+// ✅ CONNECT DATABASE
+// ==================================================
 connectDB();
 
-/* ================================================
-   ✅ SECURITY & BASIC MIDDLEWARE
-================================================ */
+// ==================================================
+// ✅ SECURITY & BASIC MIDDLEWARE
+// ==================================================
 app.use(helmet());
 app.use(express.json());
 app.use(morgan("dev"));
 app.use("/uploads", express.static("uploads"));
 
-/* ================================================
-   ✅ GLOBAL REQUEST LOGGER
-================================================ */
+// ==================================================
+// ✅ TRUST PROXY (for correct client IP logging)
+// ==================================================
+  app.set("trust proxy", true);
+
+// ==================================================
+// ✅ GLOBAL REQUEST LOGGER
+// ==================================================
 app.use((req, res, next) => {
   const ip =
     req.headers["x-forwarded-for"]?.split(",")[0] ||
@@ -42,9 +45,9 @@ app.use((req, res, next) => {
   next();
 });
 
-/* ================================================
-   ✅ CORS CONFIGURATION
-================================================ */
+// ==================================================
+// ✅ CORS CONFIGURATION
+// ==================================================
 const allowedOrigins = [
   "http://localhost:3000",
   "http://192.168.0.110:3000",
@@ -65,45 +68,53 @@ app.use(
     origin: function (origin, callback) {
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
-
       const domainRegex = /^https:\/\/([a-z0-9-]+\.)*kzarre\.com$/;
       if (domainRegex.test(origin)) return callback(null, true);
-
       console.warn(`🚫 CORS blocked from: ${origin}`);
       return callback(new Error("Not allowed by CORS"));
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allowedHeaders: ["Content-Type", "Authorization"],
+    preflightContinue: false,
     optionsSuccessStatus: 200,
   })
 );
 
+// ✅ Handle preflight OPTIONS requests
 app.options(/.*/, cors());
 
-/* ================================================
-   ✅ RATE LIMITER (FIXED)
-================================================ */
+// ==================================================
+// ✅ RATE LIMITER
+// ==================================================
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
+  windowMs: 15 * 60 * 1000, // 15 min
   max: 120,
   message: "Too many requests from this IP. Please try again later.",
-  validate: { xForwardedForHeader: false }, // 🔥 FIXED
 });
 app.use(limiter);
+app.set("trust proxy", false);
 
-/* ================================================
-   ✅ ROUTES
-================================================ */
-app.use("/api/superadmin", require("./routes/superAdmin"));
-app.use("/api/cms-content", require("./routes/cmsRoutes"));
-app.use("/api/auth", require("./routes/auth"));
-app.use("/api/products", require("./routes/product"));
-app.use("/api/usersadmin", require("./routes/adminUserRoutes"));
 
-/* ================================================
-   ✅ ROOT TEST ROUTE
-================================================ */
+// ==================================================
+// ✅ ROUTES (keep BEFORE error handler)
+// ==================================================
+const authRoutes = require("./routes/auth");
+const productRoutes = require("./routes/product");
+const cmsRoutes = require("./routes/cmsRoutes");
+const adminUserRoutes = require("./routes/adminUserRoutes");
+const superAdminRoutes = require("./routes/superAdmin");
+
+
+app.use("/api/superadmin", superAdminRoutes);
+app.use("/api/cms-content", cmsRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/products", productRoutes); // ✅ moved above errorHandler
+app.use("/api/usersadmin", adminUserRoutes);
+
+// ==================================================
+// ✅ ROOT TEST ROUTE
+// ==================================================
 app.get("/", (req, res) => {
   res.status(200).json({
     status: "OK",
@@ -113,14 +124,14 @@ app.get("/", (req, res) => {
   });
 });
 
-/* ================================================
-   ✅ GLOBAL ERROR HANDLER
-================================================ */
+// ==================================================
+// ✅ GLOBAL ERROR HANDLER (keep last)
+// ==================================================
 app.use(errorHandler);
 
-/* ================================================
-   ✅ START SERVER
-================================================ */
+// ==================================================
+// ✅ START SERVER
+// ==================================================
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`\n✅ Server running on port ${PORT}`);
