@@ -5,7 +5,7 @@ const router = express.Router();
 const Customer = require("../models/Customer");
 const Order = require("../models/Order");
 const Traffic = require("../models/Traffic");
-const Product = require("../models/Product");
+const Product = require("../models/product");
 // =============================
 // 📌 SUMMARY
 // =============================
