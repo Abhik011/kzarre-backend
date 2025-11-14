@@ -3,7 +3,7 @@ const jwt = require("jsonwebtoken");
 const SuperAdmin = require("../models/SuperAdmin");
 const { sendEmail } = require("../utils/sendEmail");
 const { superAdminOTPTemplate } = require("../utils/emailTemplates");
-
+const { logActivity } = require("../utils/logActivity");
 const router = express.Router();
 
 router.get("/status", (req, res) => {
@@ -77,12 +77,24 @@ router.post("/verify-otp", async (req, res) => {
     await newSuperAdmin.save();
     delete pendingSuperAdmins[email]; // clear from memory
 
+      // Extract IP + User Agent
+    const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+    const userAgent = req.headers["user-agent"];
+
+   await logActivity({
+      userId: newSuperAdmin._id,
+      userName: newSuperAdmin.name,
+      role: "superadmin",
+      action: "REGISTER",
+      ip,
+      userAgent,
+    });
     // ✅ Generate new token immediately after registration
     const token = jwt.sign(
       { id: newSuperAdmin._id, role: "superadmin" },
       process.env.JWT_SECRET,
       { expiresIn: "7d" }
-    );
+    );  
 
     res.status(201).json({
       success: true,
@@ -125,6 +137,19 @@ router.post("/login", async (req, res) => {
       "KZARRÈ SuperAdmin Login OTP",
       superAdminOTPTemplate(superAdmin.name, otp, "login")
     );
+
+    const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+    const userAgent = req.headers["user-agent"];
+
+    // ⭐ Global Activity Log
+    await logActivity({
+      userId: superAdmin._id,
+      userName: superAdmin.name,
+      role: "superadmin",
+      action: "LOGIN_OTP_SENT",
+      ip,
+      userAgent,
+    });
 
     res.json({
       success: true,

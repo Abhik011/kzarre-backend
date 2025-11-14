@@ -104,17 +104,21 @@ const productRoutes = require("./routes/product");
 const cmsRoutes = require("./routes/cmsRoutes");
 const adminUserRoutes = require("./routes/adminUserRoutes");
 const superAdminRoutes = require("./routes/superAdmin");
+const activity = require("./routes/activity")
+const analytics = require("./routes/analytics")
+const track = require("./routes/track")
 
 
+app.use("/api/track",track);
+app.use("/api/analytics",analytics);
+app.use("/api/activity", activity);
 app.use("/api/superadmin", superAdminRoutes);
 app.use("/api/cms-content", cmsRoutes);
 app.use("/api/auth", authRoutes);
-app.use("/api/products", productRoutes); // ✅ moved above errorHandler
+app.use("/api/products", productRoutes); 
 app.use("/api/usersadmin", adminUserRoutes);
 
-// ==================================================
-// ✅ ROOT TEST ROUTE
-// ==================================================
+
 app.get("/", (req, res) => {
   res.status(200).json({
     status: "OK",
@@ -124,14 +128,10 @@ app.get("/", (req, res) => {
   });
 });
 
-// ==================================================
-// ✅ GLOBAL ERROR HANDLER (keep last)
-// ==================================================
+
 app.use(errorHandler);
 
-// ==================================================
-// ✅ START SERVER
-// ==================================================
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`\n✅ Server running on port ${PORT}`);
