@@ -112,9 +112,70 @@ router.patch("/:orderId/status", async (req, res) => {
 // ==================================================
 // 5. CANCEL ORDER
 // ==================================================
-router.patch("/:orderId/cancel", async (req, res) => {
-  // (same as before, no changes)
+// ==================================================
+// ✅ 5. CANCEL ORDER (USER)
+// URL: PUT /api/orders/cancel/:orderId
+// ==================================================
+router.put("/cancel/:orderId", async (req, res) => {
+  try {
+    const { orderId } = req.params;
+
+    const order = await Order.findOne({ orderId });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    // ❌ Already cancelled
+    if (order.status === "cancelled") {
+      return res.status(400).json({
+        success: false,
+        message: "Order already cancelled",
+      });
+    }
+
+    // ❌ Delivered orders cannot be cancelled
+    if (order.status === "delivered") {
+      return res.status(400).json({
+        success: false,
+        message: "Delivered order cannot be cancelled",
+      });
+    }
+
+    // ✅ ALLOW cancel only if:
+    // pending | paid | failed | shipped
+    const cancellable = ["pending", "paid", "failed", "shipped"];
+
+    if (!cancellable.includes(order.status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Order cannot be cancelled in '${order.status}' state`,
+      });
+    }
+
+    // ✅ UPDATE STATUS
+    order.status = "cancelled";
+    order.cancelledAt = new Date();
+
+    await order.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Order cancelled successfully",
+      order,
+    });
+  } catch (error) {
+    console.error("CANCEL ERROR:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error while cancelling order",
+    });
+  }
 });
+
 
 // ==================================================
 // ⭐ 6. GET SINGLE ORDER (MUST BE LAST)

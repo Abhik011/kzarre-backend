@@ -65,6 +65,7 @@ const allowedOrigins = [
   "https://admin.kzarre.com",
    "http://kzarre.local:3000",
    "http://kzarre.local:3001",
+   "https://kzarre-admin.vercel.app",
 
 ];
 
