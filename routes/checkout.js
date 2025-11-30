@@ -22,7 +22,7 @@ router.post("/create-order", async (req, res) => {
       });
     }
 
-    // 1️⃣ Find product
+    // ✅ Find product
     const product = await Product.findById(productId);
     if (!product) {
       return res.status(404).json({
@@ -33,13 +33,10 @@ router.post("/create-order", async (req, res) => {
 
     let variant = null;
 
-    // 2️⃣ Variant product
+    // ✅ Variant check ONLY (NO STOCK REDUCTION HERE)
     if (Array.isArray(product.variants) && product.variants.length > 0) {
-      
       variant = product.variants.find(
-        (v) =>
-          v.size === size &&
-          (color ? v.color === color : true)
+        (v) => v.size === size && (color ? v.color === color : true)
       );
 
       if (!variant) {
@@ -49,48 +46,32 @@ router.post("/create-order", async (req, res) => {
         });
       }
 
-      // 3️⃣ Check variant stock
       if (variant.stock < qty) {
         return res.status(400).json({
           success: false,
           message: `Only ${variant.stock} items left in stock`,
         });
       }
-
-      // Reduce variant stock
-      variant.stock -= qty;
-
-      // Update total stock
-      product.stockQuantity = product.variants.reduce(
-        (sum, v) => sum + (v.stock || 0),
-        0
-      );
-
     } else {
-      // 2️⃣ Simple product
+      // ✅ Simple product stock check ONLY
       if ((product.stockQuantity || 0) < qty) {
         return res.status(400).json({
           success: false,
           message: `Only ${product.stockQuantity} items left`,
         });
       }
-
-      product.stockQuantity = (product.stockQuantity || 0) - qty;
     }
 
-    // 6️⃣ Save product
-    await product.save();
-
-    // 7️⃣ Calculate totals
+    // ✅ Calculate totals
     const subtotal = product.price * qty;
     const deliveryFee = 15;
     const totalAmount = subtotal + deliveryFee;
 
-    // Generate order ID
+    // ✅ Generate order ID
     const generatedOrderId =
       "ORD-" + Math.floor(100000 + Math.random() * 900000);
 
-    // 8️⃣ Create order
+    // ✅ Create PENDING Order (NO STOCK TOUCHED)
     const order = await Order.create({
       userId: userId ? new mongoose.Types.ObjectId(userId) : null,
 
@@ -100,15 +81,12 @@ router.post("/create-order", async (req, res) => {
           qty,
           price: product.price,
 
-          // ⭐ Fully Dynamic Product Export
           name: product.name,
           image: product.imageUrl,
 
-          // ⭐ Variant Details
           size: size || "",
           color: color || "",
 
-          // ⭐ NEW FIELDS (for premium shipping label)
           sku: product.sku || "N/A",
           barcode: variant?.barcode || product.sku || "N/A",
         },
@@ -116,10 +94,14 @@ router.post("/create-order", async (req, res) => {
 
       address,
       amount: totalAmount,
-      paymentMethod: "COD",
+
+      paymentMethod: "ONLINE",
       paymentId: null,
+
       orderId: generatedOrderId,
       status: "pending",
+      paymentStatus: "unpaid",
+
       createdAt: new Date(),
     });
 
@@ -138,6 +120,7 @@ router.post("/create-order", async (req, res) => {
     });
   }
 });
+
 
 
 
@@ -174,5 +157,109 @@ router.get("/order/:orderId", async (req, res) => {
     });
   }
 });
+router.post("/payment-success", async (req, res) => {
+  try {
+    const { orderId, paymentId } = req.body;
+
+    const order = await Order.findOne({ orderId });
+    if (!order) {
+      return res.status(404).json({ success: false, message: "Order not found" });
+    }
+
+    // ✅ Loop through all items & reduce stock NOW
+    for (const item of order.items) {
+      const product = await Product.findById(item.product);
+
+      if (!product) continue;
+
+      if (Array.isArray(product.variants) && product.variants.length > 0) {
+        const variant = product.variants.find(
+          (v) =>
+            v.size === item.size &&
+            (item.color ? v.color === item.color : true)
+        );
+
+        if (variant) {
+          variant.stock -= item.qty;
+          if (variant.stock < 0) variant.stock = 0;
+        }
+
+        product.stockQuantity = product.variants.reduce(
+          (sum, v) => sum + (v.stock || 0),
+          0
+        );
+      } else {
+        product.stockQuantity -= item.qty;
+        if (product.stockQuantity < 0) product.stockQuantity = 0;
+      }
+
+      await product.save();
+    }
+
+    // ✅ Mark order paid
+    order.paymentStatus = "paid";
+    order.paymentId = paymentId || "ONLINE";
+    order.status = "confirmed";
+
+    await order.save();
+
+    return res.json({
+      success: true,
+      message: "Payment success & stock updated",
+    });
+
+  } catch (err) {
+    console.error("payment-success error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Payment success failed",
+    });
+  }
+});
+router.post("/payment-cancel", async (req, res) => {
+  try {
+    const { orderId } = req.body;
+
+    await Order.findOneAndDelete({ orderId });
+
+    return res.json({
+      success: true,
+      message: "Order cancelled & removed",
+    });
+
+  } catch (err) {
+    console.error("payment-cancel error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Cancel failed",
+    });
+  }
+});
+
+/*
+|--------------------------------------------------------------------------
+| ✅ ADMIN: DELETE ALL ORDERS
+|     DELETE /api/checkout/delete-all-orders
+|--------------------------------------------------------------------------
+*/
+router.delete("/delete-all-orders", async (req, res) => {
+  try {
+    const result = await Order.deleteMany({});
+
+    return res.json({
+      success: true,
+      message: "✅ All orders deleted successfully",
+      deletedCount: result.deletedCount,
+    });
+
+  } catch (err) {
+    console.error("delete-all-orders error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete orders",
+    });
+  }
+});
+
 
 module.exports = router;

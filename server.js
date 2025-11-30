@@ -128,6 +128,7 @@ app.use("/api/cart", require("./routes/cart"));
 app.use("/api/otp-password", require("./routes/otpPassword"));
 app.use("/api/email-otp-password", require("./routes/emailOtpPassword"));
 app.use("/api/search", require("./routes/search"));
+app.use("/api/notify", require("./routes/notifyRoutes"))
 
 
 
