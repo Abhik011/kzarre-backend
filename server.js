@@ -28,7 +28,8 @@ app.use("/uploads", express.static("uploads"));
 // ----------------------------
 // TRUST PROXY (NEEDED FOR IP)
 // ----------------------------
-app.set("trust proxy", false); // <-- keep this
+app.set("trust proxy", 1);
+ // <-- keep this
 
 
 // ----------------------------
@@ -97,7 +98,7 @@ const limiter = rateLimit({
   max: isLocal ? 5000 : 200,  // local = unlimited
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => req.ip,
+    keyGenerator: rateLimit.ipKeyGenerator,
 });
 
 app.use((req, res, next) => {
@@ -109,7 +110,7 @@ app.use((req, res, next) => {
 // ----------------------------
 // ROUTES
 // ----------------------------
-
+app.use("/api/checkout/webhook/stripe", express.raw({ type: "application/json" }));
 // app.use("/api/analytics",  require("./routes/analyticsRoutes"));
 app.use("/api/geoip", require("./routes/geoip"));
 app.use("/api/track", require("./routes/track"));

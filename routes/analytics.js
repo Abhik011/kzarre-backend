@@ -185,62 +185,51 @@ router.get('/traffic/country', async (req, res) => {
     const analytics = await Traffic.aggregate([
       {
         $group: {
-          _id: { $ifNull: ['$country', 'UN'] },
-          visits: { $sum: 1 }
+          _id: { $ifNull: ['$country', 'UN'] }, // ISO like IN, US
+          visitors: { $sum: 1 }
         }
       },
-      { $sort: { visits: -1 } }
+      { $sort: { visitors: -1 } }
     ]);
 
-    // ISO2 Mapping (extend when needed)
-    const COUNTRY_MAP = {
-      India: "IN",
-      USA: "US",
-      "United States": "US",
-      Canada: "CA",
-      Pakistan: "PK",
-      Bangladesh: "BD",
-      China: "CN",
-      Japan: "JP",
-      Germany: "DE",
-      France: "FR",
-      Italy: "IT",
-      Spain: "ES",
-      Brazil: "BR",
-      Russia: "RU",
-      Australia: "AU",
-      "United Kingdom": "GB",
-      UK: "GB",
-      UAE: "AE",
-      Turkey: "TR",
-      Saudi: "SA",
-      SaudiArabia: "SA",
-      Unknown: "UN",
-      null: "UN",
-      "": "UN"
+    // ✅ ISO → Full Name Map
+    const ISO_TO_NAME = {
+      IN: "India",
+      US: "United States",
+      GB: "United Kingdom",
+      CA: "Canada",
+      AU: "Australia",
+      DE: "Germany",
+      FR: "France",
+      AE: "United Arab Emirates",
+      SG: "Singapore",
+      PK: "Pakistan",
+      BD: "Bangladesh",
+      CN: "China",
+      JP: "Japan",
+      IT: "Italy",
+      ES: "Spain",
+      BR: "Brazil",
+      RU: "Russia",
+      TR: "Turkey",
+      SA: "Saudi Arabia",
+      UN: "Unknown"
     };
 
-    // Clean + convert to ISO2
-    const cleaned = analytics.map((c) => {
-      let country = String(c._id).trim();
+    // ✅ FORMAT EXACTLY AS FRONTEND EXPECTS
+    const formatted = analytics.map((c) => ({
+      country: ISO_TO_NAME[c._id] || "Unknown",
+      code: c._id || "",
+      visitors: c.visitors || 0
+    }));
 
-      // If already ISO2 (IN, US…), keep it
-      if (/^[A-Z]{2}$/.test(country)) {
-        return { _id: country, visits: c.visits };
-      }
-
-      // Convert full name → ISO2
-      const iso = COUNTRY_MAP[country] || "UN";
-
-      return { _id: iso, visits: c.visits };
-    });
-
-    res.json({ success: true, countries: cleaned });
+    res.json({ success: true, countries: formatted });
   } catch (err) {
     console.error('Country Traffic Error:', err);
     res.status(500).json({ success: false, message: 'Country traffic failed' });
   }
 });
+
 
 
 // ---------------------------
