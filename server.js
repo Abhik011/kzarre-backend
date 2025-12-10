@@ -113,6 +113,9 @@ const allowedOrigins = [
    "http://kzarre.local:3001",
    "https://kzarre-admin.vercel.app",
    "https://0jvrs0g4-3000.inc1.devtunnels.ms/",
+   "http://13.60.212.51:5500/",
+   "http://13.60.212.51:3000/",
+   "http://13.60.212.51:3001/",
 
 ];
 
