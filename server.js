@@ -116,7 +116,8 @@ const allowedOrigins = [
    "http://13.60.212.51:5500/",
    "http://13.60.212.51:3000/",
    "http://13.60.212.51:3001/",
-
+   "http://13.60.212.51/",
+   "http://kzarre-aws.duckdns.org/",
 ];
 
 app.use(
