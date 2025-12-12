@@ -1,24 +1,32 @@
-name: Deploy Backend to EC2
+name: Deploy Backend
 
 on:
   push:
-    branches: 
-      - main
+    branches: [ main ]
 
 jobs:
-  deploy-backend:
+  deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout Backend Repo
+      uses: actions/checkout@v4
 
-      - name: Deploy Backend on EC2 (Blue-Green)
-        uses: appleboy/ssh-action@v1.0.0
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ec2-user
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            echo "🚀 Running backend deploy script..."
-            bash /home/ec2-user/deploy-backend.sh
+    - name: Upload Backend to EC2
+      uses: appleboy/scp-action@v0.1.7
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ec2-user
+        key: ${{ secrets.EC2_SSH_KEY }}
+        source: "."
+        target: "/home/ec2-user/kzarre-backend"
+
+    - name: Run Backend Deploy Script
+      uses: appleboy/ssh-action@v0.1.7
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ec2-user
+        key: ${{ secrets.EC2_SSH_KEY }}
+        script: |
+          chmod +x /home/ec2-user/deploy-backend.sh
+          /home/ec2-user/deploy-backend.sh
