@@ -196,9 +196,8 @@ app.use("/api/admin/ads", require("./routes/adminAds"));
 app.use("/api/crm", require("./routes/adminCRM"));
 app.use("/cms", require("./routes/cmsFont"));
 
-// cheching piplines
-// check piple 2
-// checking zero down with deployment 
+
+// 555checking zero down with deployment 
 
 app.get("/", (req, res) => {
   res.json({
