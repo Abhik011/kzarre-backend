@@ -1,60 +1,43 @@
-name: Deploy Backend
+#!/bin/bash
+set -e
 
-on:
-  push:
-    branches: [ main ]
+APP_DIR="/home/ec2-user/kzarre-backend"
+BLUE_PORT=5501
+GREEN_PORT=5502
 
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
+BLUE_NAME="kzarre-backend-blue"
+GREEN_NAME="kzarre-backend-green"
 
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+echo "🔄 Pulling latest backend code..."
+cd $APP_DIR
+git pull
 
-    - name: Zip backend
-      run: zip -r backend.zip .
+echo "📦 Installing dependencies..."
+npm install --production
 
-    - name: Copy to EC2
-      uses: appleboy/scp-action@v0.1.4
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ec2-user
-        key: ${{ secrets.EC2_KEY }}
-        source: "backend.zip"
-        target: "/home/ec2-user/app-backend/"
+# Detect which slot is free
+if pm2 describe $BLUE_NAME > /dev/null 2>&1; then
+    TARGET=$GREEN_NAME
+    PORT=$GREEN_PORT
+else
+    TARGET=$BLUE_NAME
+    PORT=$BLUE_PORT
+fi
 
-    - name: Deploy on EC2
-      uses: appleboy/ssh-action@v0.1.10
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ec2-user
-        key: ${{ secrets.EC2_KEY }}
-        script: |
-          cd app-backend
-          unzip -o backend.zip
-          npm install --production
-          
-          ACTIVE=$(curl -s http://localhost/api/health | grep '5501' && echo blue || echo green)
+echo "🚀 Starting backend ($TARGET) on port $PORT..."
+pm2 start server.js --name $TARGET -- --port=$PORT || pm2 restart $TARGET -- --port=$PORT
 
-          if [ "$ACTIVE" = "blue" ]; then
-            pm2 restart kzarre-backend-green
-            HEALTH=$(bash /home/ec2-user/health-check.sh http://127.0.0.1:5502/api/health)
-            if [ "$HEALTH" = "OK" ]; then
-              bash /home/ec2-user/switch-blue-green.sh backend green
-            else
-              pm2 restart kzarre-backend-blue
-              exit 1
-            fi
-          else
-            pm2 restart kzarre-backend-blue
-            HEALTH=$(bash /home/ec2-user/health-check.sh http://127.0.0.1:5501/api/health)
-            if [ "$HEALTH" = "OK" ]; then
-              bash /home/ec2-user/switch-blue-green.sh backend blue
-            else
-              pm2 restart kzarre-backend-green
-              exit 1
-            fi
-          fi
+echo "⏳ Waiting for app to boot..."
+sleep 5
 
-          pm2 save
+echo "🩺 Running health check..."
+if curl -fs http://127.0.0.1:$PORT/ > /dev/null; then
+    echo "✅ Backend healthy. Switching traffic..."
+    bash /home/ec2-user/switch-blue-green.sh backend $PORT
+else
+    echo "❌ Backend failed health check! Aborting."
+    exit 1
+fi
+
+echo "💾 Saving PM2 state..."
+pm2 save
