@@ -1,43 +1,24 @@
-#!/bin/bash
-set -e
+name: Deploy Backend to EC2
 
-APP_DIR="/home/ec2-user/kzarre-backend"
-BLUE_PORT=5501
-GREEN_PORT=5502
+on:
+  push:
+    branches: 
+      - main
 
-BLUE_NAME="kzarre-backend-blue"
-GREEN_NAME="kzarre-backend-green"
+jobs:
+  deploy-backend:
+    runs-on: ubuntu-latest
 
-echo "🔄 Pulling latest backend code..."
-cd $APP_DIR
-git pull
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-echo "📦 Installing dependencies..."
-npm install --production
-
-# Detect which slot is free
-if pm2 describe $BLUE_NAME > /dev/null 2>&1; then
-    TARGET=$GREEN_NAME
-    PORT=$GREEN_PORT
-else
-    TARGET=$BLUE_NAME
-    PORT=$BLUE_PORT
-fi
-
-echo "🚀 Starting backend ($TARGET) on port $PORT..."
-pm2 start server.js --name $TARGET -- --port=$PORT || pm2 restart $TARGET -- --port=$PORT
-
-echo "⏳ Waiting for app to boot..."
-sleep 5
-
-echo "🩺 Running health check..."
-if curl -fs http://127.0.0.1:$PORT/ > /dev/null; then
-    echo "✅ Backend healthy. Switching traffic..."
-    bash /home/ec2-user/switch-blue-green.sh backend $PORT
-else
-    echo "❌ Backend failed health check! Aborting."
-    exit 1
-fi
-
-echo "💾 Saving PM2 state..."
-pm2 save
+      - name: Deploy Backend on EC2 (Blue-Green)
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            echo "🚀 Running backend deploy script..."
+            bash /home/ec2-user/deploy-backend.sh
