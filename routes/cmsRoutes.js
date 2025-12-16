@@ -8,7 +8,7 @@ require("dotenv").config();
 const CMSFont = require("../models/CMSFont");
 const { DateTime } = require("luxon");
 const BRAND_TIMEZONE = "America/New_York"; // ✅ New Jersey
-const Product = require("../models/Product");
+const Product = require("../models/product");
 const { sendNotification } = require("../utils/notify");
 const compressVideo = require("../utils/compressVideo");
 const compressImage = require("../utils/compressImage");
