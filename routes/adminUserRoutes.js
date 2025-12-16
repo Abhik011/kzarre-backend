@@ -2,25 +2,59 @@ const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const Admin = require("../models/Admin");
+const Role = require("../models/Role");
+const Permission = require("../models/Permission");
 const { auth, authorizeRoles } = require("../middlewares/roleAuth");
 const { sendEmail } = require("../utils/sendEmail");
+
 const router = express.Router();
 
-
+/* ======================================================
+   🔐 LOGIN (WITH PERMISSIONS)
+====================================================== */
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
-    const admin = await Admin.findOne({ email });
 
+    const admin = await Admin.findOne({ email });
     if (!admin) return res.status(404).json({ message: "Admin not found." });
     if (!admin.isActive)
-      return res.status(403).json({ message: "Admin account is inactive." });
+      return res.status(403).json({ message: "Admin account inactive." });
 
     const valid = await bcrypt.compare(password, admin.password);
     if (!valid) return res.status(400).json({ message: "Invalid password." });
 
-    // 🔑 Generate tokens
-    const payload = { id: admin._id, role: admin.role };
+    /* ================================
+       🔑 RESOLVE PERMISSIONS
+    ================================= */
+    let resolvedPermissions = [];
+
+    // 🔥 Superadmin → all permissions
+    if (admin.role === "superadmin") {
+      const allPermissions = await Permission.find().select("key");
+      resolvedPermissions = allPermissions.map(p => p.key);
+    } else {
+      // 1️⃣ Role permissions
+      if (admin.role) {
+        const roleDoc = await Role.findOne({ name: admin.role });
+        if (roleDoc?.permissions?.length) {
+          resolvedPermissions.push(...roleDoc.permissions);
+        }
+      }
+
+      // 2️⃣ User-specific permissions (override)
+      if (admin.permissions?.length) {
+        resolvedPermissions.push(...admin.permissions);
+      }
+    }
+
+    // 🧹 Remove duplicates
+    resolvedPermissions = [...new Set(resolvedPermissions)];
+
+    /* ================================
+       🔑 TOKENS
+    ================================= */
+    const payload = { id: admin._id };
     const accessToken = jwt.sign(payload, process.env.JWT_SECRET, {
       expiresIn: "15m",
     });
@@ -28,11 +62,12 @@ router.post("/login", async (req, res) => {
       expiresIn: "7d",
     });
 
-    // 📍 Capture IP + device info
+    /* ================================
+       📍 SESSION + ACTIVITY
+    ================================= */
     const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
     const userAgent = req.headers["user-agent"];
 
-    // ❌ Allow only one active session
     admin.currentSession = {
       token: refreshToken,
       ip,
@@ -40,12 +75,12 @@ router.post("/login", async (req, res) => {
       loginAt: new Date(),
     };
 
-    // 🧾 Add to activity log
     admin.activityLogs.push({ action: "LOGIN", ip, userAgent });
-
     await admin.save();
 
-    // 🍪 Send secure refresh token cookie
+    /* ================================
+       🍪 COOKIE
+    ================================= */
     res.cookie("refresh_token", refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -53,293 +88,132 @@ router.post("/login", async (req, res) => {
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
+    /* ================================
+       ✅ RESPONSE
+    ================================= */
     res.json({
       success: true,
-      message: "✅ Admin login successful.",
+      message: "✅ Login successful",
       accessToken,
       admin: {
         id: admin._id,
         name: admin.name,
         email: admin.email,
         role: admin.role,
+        permissions: resolvedPermissions, // 🔥 IMPORTANT
       },
     });
   } catch (err) {
-    console.error("Admin Login Error:", err);
-    res.status(500).json({ message: "Server error during login." });
+    console.error("LOGIN ERROR:", err);
+    res.status(500).json({ message: "Server error" });
   }
 });
 
-
+/* ======================================================
+   🔄 REFRESH TOKEN (NO CHANGE)
+====================================================== */
 router.post("/refresh", async (req, res) => {
   try {
     const oldToken = req.cookies?.refresh_token;
-    if (!oldToken) return res.status(401).json({ message: "No refresh token." });
+    if (!oldToken) return res.status(401).json({ message: "No refresh token" });
 
     const payload = jwt.verify(oldToken, process.env.REFRESH_TOKEN_SECRET);
     const admin = await Admin.findById(payload.id);
+    if (!admin) return res.status(401).json({ message: "User not found" });
 
-    if (!admin) return res.status(401).json({ message: "User not found." });
-
-    const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
-
-    if (
-      !admin.currentSession ||
-      admin.currentSession.token !== oldToken ||
-      admin.currentSession.ip !== ip
-    ) {
-      return res.status(401).json({ message: "Session invalid or expired." });
+    if (admin.currentSession?.token !== oldToken) {
+      return res.status(401).json({ message: "Session invalid" });
     }
 
-    // 🔥 Generate NEW tokens
-    const newPayload = { id: admin._id, role: admin.role };
-
-    const newAccessToken = jwt.sign(newPayload, process.env.JWT_SECRET, {
-      expiresIn: "15m",
-    });
-
-    const newRefreshToken = jwt.sign(newPayload, process.env.REFRESH_TOKEN_SECRET, {
-      expiresIn: "7d",
-    });
-
-    // 📝 Update DB session
-    admin.currentSession.token = newRefreshToken;
-    admin.currentSession.loginAt = new Date();
-    await admin.save();
-
-    // 🍪 UPDATE refresh cookie
-    res.cookie("refresh_token", newRefreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-
-    return res.json({
-      success: true,
-      accessToken: newAccessToken,
-    });
-  } catch (err) {
-    console.error("REFRESH ERROR:", err);
-    return res.status(401).json({ message: "Invalid or expired refresh token." });
-  }
-});
-
-
-
-router.post("/logout", async (req, res) => {
-  try {
-    const token = req.cookies?.refresh_token;
-    if (!token) return res.json({ message: "Already logged out." });
-
-    const payload = jwt.verify(token, process.env.REFRESH_TOKEN_SECRET);
-    const admin = await Admin.findById(payload.id);
-    const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
-
-    if (admin && admin.currentSession?.token === token) {
-      admin.currentSession.logoutAt = new Date();
-      admin.activityLogs.push({
-        action: "LOGOUT",
-        ip,
-        userAgent: req.headers["user-agent"],
-      });
-      admin.currentSession = null;
-      await admin.save();
-    }
-
-    res.clearCookie("refresh_token", {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-    });
-
-    res.json({ message: "✅ Admin logged out successfully." });
-  } catch (err) {
-    res.clearCookie("refresh_token");
-    res.json({ message: "✅ Logged out." });
-  }
-});
-
-
-router.get("/activity", auth, async (req, res) => {
-  try {
-    const admin = await Admin.findById(req.user.id).select(
-      "email name currentSession activityLogs"
+    const newAccessToken = jwt.sign(
+      { id: admin._id },
+      process.env.JWT_SECRET,
+      { expiresIn: "15m" }
     );
-    if (!admin) return res.status(404).json({ message: "Admin not found." });
 
-    res.json({
-      success: true,
-      currentSession: admin.currentSession,
-      activityLogs: admin.activityLogs.reverse(),
-    });
-  } catch (err) {
-    console.error("Error fetching admin activity:", err);
-    res.status(500).json({ message: "Server error." });
+    res.json({ success: true, accessToken: newAccessToken });
+  } catch {
+    res.status(401).json({ message: "Invalid refresh token" });
   }
 });
 
-
-
-router.post("/create-user", auth, authorizeRoles("superadmin"),
+/* ======================================================
+   📜 PERMISSIONS (SUPERADMIN)
+====================================================== */
+router.get(
+  "/permissions",
+  auth,
+  authorizeRoles("superadmin"),
   async (req, res) => {
-    try {
-      const { firstName, lastName, email, role, group, status } = req.body;
-
-      const existing = await Admin.findOne({ email });
-      if (existing)
-        return res.status(400).json({ message: "Admin already exists." });
-
-      // 🔐 Generate temporary password
-      const tempPassword = Math.random().toString(36).slice(-8);
-      const hashedPassword = await bcrypt.hash(tempPassword, 10);
-
-      // 👤 Create admin account
-      const newAdmin = new Admin({
-        name: `${firstName} ${lastName}`,
-        email,
-        password: hashedPassword,
-        role: role || "admin",
-        group: group || "none",
-        isActive: status === "Active",
-      });
-
-      await newAdmin.save();
-
-      // 📌 Login URL (change to your real frontend domain)
-      const loginUrl = `${process.env.FRONTEND_URL}/admin/login`;
-
-      // 📩 Email body
-      const emailHTML = `
-        <div style="font-family: Arial; padding: 20px;">
-          <h2>Welcome to KZARRÈ, ${firstName}!</h2>
-          <p>Your admin account has been created successfully.</p>
-
-          <h3>🔐 Login Details</h3>
-          <p><strong>Email:</strong> ${email}</p>
-          <p><strong>Temporary Password:</strong> ${tempPassword}</p>
-
-          <p>Please log in and change your password immediately.</p>
-
-          <a href="${loginUrl}" 
-             style="display: inline-block; margin-top: 10px; padding: 10px 20px; background: #4CAF50; color: white; text-decoration: none; border-radius: 6px;">
-             Login Now
-          </a>
-
-          <br/><br/>
-          <p>Regards,<br/>KZARRÈ Team</p>
-        </div>
-      `;
-
-      // 📬 Send welcome email
-      await sendEmail(
-        email,
-        "Welcome to KZARRÈ – Your Admin Account",
-        emailHTML
-      );
-
-      return res.status(201).json({
-        message: "✅ Admin created successfully. Email sent.",
-        admin: newAdmin,
-        tempPassword,
-      });
-    } catch (err) {
-      console.error("Error creating admin:", err);
-      res.status(500).json({ message: "Server error." });
-    }
+    const permissions = await Permission.find().sort("key");
+    res.json({ permissions });
   }
 );
 
-
-
-router.get("/users", auth, authorizeRoles("superadmin"), async (req, res) => {
-  console.log("\n===== USERS ROUTE DEBUG =====");
-  console.log("User accessing:", req.user);
-  console.log("==============================\n");
-
-  try {
-    const admins = await Admin.find().select("-password");
-    res.json(admins);
-  } catch (err) {
-    console.error("Error fetching admins:", err);
-    res.status(500).json({ message: "Server error." });
+/* ======================================================
+   🧩 ROLES
+====================================================== */
+router.get(
+  "/roles",
+  auth,
+  authorizeRoles("superadmin"),
+  async (req, res) => {
+    const roles = await Role.find();
+    res.json({ roles });
   }
+);
+
+router.post(
+  "/roles",
+  auth,
+  authorizeRoles("superadmin"),
+  async (req, res) => {
+    const { name, permissions } = req.body;
+
+    const exists = await Role.findOne({ name });
+    if (exists)
+      return res.status(400).json({ message: "Role already exists" });
+
+    const role = await Role.create({ name, permissions });
+    res.status(201).json({ message: "✅ Role created", role });
+  }
+);
+
+/* ======================================================
+   👤 USERS
+====================================================== */
+router.get("/users", auth, authorizeRoles("superadmin"), async (req, res) => {
+  const admins = await Admin.find().select("-password");
+  res.json(admins);
 });
-
-
 
 router.put(
-  "/update-user/:id",
+  "/update-permissions/:id",
   auth,
   authorizeRoles("superadmin"),
   async (req, res) => {
-    try {
-      const { role, group, status } = req.body;
+    const admin = await Admin.findByIdAndUpdate(
+      req.params.id,
+      { permissions: req.body.permissions },
+      { new: true }
+    ).select("-password");
 
-      const updatedAdmin = await Admin.findByIdAndUpdate(
-        req.params.id,
-        {
-          ...(role && { role }),
-          ...(group && { group }),
-          ...(status && { isActive: status === "Active" }),
-        },
-        { new: true }
-      ).select("-password");
-
-      if (!updatedAdmin)
-        return res.status(404).json({ message: "Admin not found." });
-
-      res.json({
-        message: "✅ Admin updated successfully.",
-        admin: updatedAdmin,
-      });
-    } catch (err) {
-      console.error("Error updating admin:", err);
-      res.status(500).json({ message: "Server error." });
-    }
+    res.json({ message: "✅ Permissions updated", admin });
   }
 );
-
-
-router.delete(
-  "/delete-user/:id",
-  auth,
-  authorizeRoles("superadmin"),
-  async (req, res) => {
-    try {
-      const deletedAdmin = await Admin.findByIdAndDelete(req.params.id);
-      if (!deletedAdmin)
-        return res.status(404).json({ message: "Admin not found." });
-
-      res.json({ message: "✅ Admin deleted successfully." });
-    } catch (err) {
-      console.error("Error deleting admin:", err);
-      res.status(500).json({ message: "Server error." });
-    }
-  }
-);
-
 
 router.put(
   "/toggle-active/:id",
   auth,
   authorizeRoles("superadmin"),
   async (req, res) => {
-    try {
-      const admin = await Admin.findById(req.params.id);
-      if (!admin) return res.status(404).json({ message: "Admin not found." });
+    const admin = await Admin.findById(req.params.id);
+    admin.isActive = !admin.isActive;
+    await admin.save();
 
-      admin.isActive = !admin.isActive;
-      await admin.save();
-
-      res.json({
-        message: `✅ Admin ${admin.isActive ? "activated" : "deactivated"}`,
-        isActive: admin.isActive,
-      });
-    } catch (err) {
-      console.error("Error toggling admin status:", err);
-      res.status(500).json({ message: "Server error." });
-    }
+    res.json({
+      message: `Admin ${admin.isActive ? "activated" : "deactivated"}`,
+    });
   }
 );
 

@@ -68,13 +68,6 @@ async function enrichAndSaveTraffic({ ip, userAgent, extra = {} }) {
   return traffic;
 }
 
-/* ==================================================
-   ROUTES / CONTROLLERS
-   All endpoints are organized and documented inline.
-   ================================================== */
-// --------------------------------------------
-// TRACK VISIT (CALL THIS FROM FRONTEND)
-// --------------------------------------------
 router.get("/track", async (req, res) => {
   try {
     const ip =
@@ -116,31 +109,49 @@ router.post("/track", async (req, res) => {
 
 router.get('/summary', async (req, res) => {
   try {
-    const totalOrders = await Order.countDocuments();
+    // ✅ Only PAID orders count
+    const revenueAgg = await Order.aggregate([
+      {
+        $match: {
+          paymentStatus: "paid" // 🔥 REQUIRED
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalRevenue: { $sum: "$amount" }, // 🔥 CORRECT FIELD
+          totalOrders: { $sum: 1 }
+        }
+      }
+    ]);
+
     const totalUsers = await Customer.countDocuments();
 
-    const totalRevenueAgg = await Order.aggregate([
-      { $group: { _id: null, total: { $sum: { $ifNull: ['$totalAmount', 0] } } } }
-    ]);
-    const totalRevenue = totalRevenueAgg[0]?.total || 0;
-
     const newUsers = await Customer.countDocuments({
-      createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+      createdAt: {
+        $gte: new Date(Date.now() - 24 * 60 * 60 * 1000)
+      }
     });
 
     res.json({
       success: true,
-      summary: { totalOrders, totalUsers, newUsers, totalRevenue }
+      summary: {
+        totalRevenue: revenueAgg[0]?.totalRevenue || 0,
+        totalOrders: revenueAgg[0]?.totalOrders || 0,
+        totalUsers,
+        newUsers
+      }
     });
   } catch (err) {
     console.error('Summary Error:', err);
-    res.status(500).json({ success: false, message: 'Analytics summary failed' });
+    res.status(500).json({
+      success: false,
+      message: 'Analytics summary failed'
+    });
   }
 });
 
-// ---------------------------
-// TRAFFIC: DAILY
-// ---------------------------
+
 router.get('/traffic/daily', async (req, res) => {
   try {
     const analytics = await Traffic.aggregate([
@@ -155,9 +166,6 @@ router.get('/traffic/daily', async (req, res) => {
   }
 });
 
-// ---------------------------
-// TRAFFIC: HOURLY (0-23)
-// ---------------------------
 router.get('/traffic/hourly', async (req, res) => {
   try {
     const analytics = await Traffic.aggregate([
@@ -177,9 +185,7 @@ router.get('/traffic/hourly', async (req, res) => {
   }
 });
 
-// ---------------------------
-// TRAFFIC: COUNTRY-WISE
-// ---------------------------
+
 router.get('/traffic/country', async (req, res) => {
   try {
     const analytics = await Traffic.aggregate([
@@ -231,10 +237,6 @@ router.get('/traffic/country', async (req, res) => {
 });
 
 
-
-// ---------------------------
-// TRAFFIC: REGION-WISE (country + region)
-// ---------------------------
 router.get('/traffic/region', async (req, res) => {
   try {
     const analytics = await Traffic.aggregate([
@@ -249,9 +251,6 @@ router.get('/traffic/region', async (req, res) => {
   }
 });
 
-// ---------------------------
-// TRAFFIC: DEVICE BREAKDOWN (mobile/desktop/tablet)
-// ---------------------------
 router.get('/traffic/devices', async (req, res) => {
   try {
     const analytics = await Traffic.aggregate([
@@ -264,9 +263,7 @@ router.get('/traffic/devices', async (req, res) => {
   }
 });
 
-// ---------------------------
-// CONVERSION RATE (visitors -> orders)
-// ---------------------------
+
 router.get('/conversion-rate', async (req, res) => {
   try {
     const totalVisitors = await Traffic.countDocuments();
@@ -303,7 +300,18 @@ router.get('/repeat-customers', async (req, res) => {
 router.get('/orders/daily', async (req, res) => {
   try {
     const orders = await Order.aggregate([
-      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, total: { $sum: 1 }, revenue: { $sum: { $ifNull: ['$totalAmount', 0] } } } },
+      {
+        $match: { paymentStatus: "paid" }
+      },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: '%Y-%m-%d', date: '$createdAt' }
+          },
+          total: { $sum: 1 },
+          revenue: { $sum: "$amount" }
+        }
+      },
       { $sort: { _id: 1 } }
     ]);
 
@@ -313,6 +321,7 @@ router.get('/orders/daily', async (req, res) => {
     res.status(500).json({ success: false, message: 'Daily orders failed' });
   }
 });
+
 
 // ---------------------------
 // TOP 5 SELLING PRODUCTS
@@ -420,7 +429,14 @@ router.post('/traffic/enrich-batch', async (req, res) => {
 router.get('/aov', async (req, res) => {
   try {
     const agg = await Order.aggregate([
-      { $group: { _id: null, totalRevenue: { $sum: { $ifNull: ['$totalAmount', 0] } }, orders: { $sum: 1 } } }
+      { $match: { paymentStatus: "paid" } },
+      {
+        $group: {
+          _id: null,
+          totalRevenue: { $sum: "$amount" },
+          orders: { $sum: 1 }
+        }
+      }
     ]);
     const totalRevenue = agg[0]?.totalRevenue || 0;
     const orders = agg[0]?.orders || 0;
@@ -454,7 +470,7 @@ router.get('/revenue-by-region', async (req, res) => {
 router.get("/users/type", async (req, res) => {
   try {
     const newUsers = await Customer.countDocuments({
-      createdAt: { $gte: new Date(Date.now() - 30*24*60*60*1000) }
+      createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
     });
 
     const totalUsers = await Customer.countDocuments();

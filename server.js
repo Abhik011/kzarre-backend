@@ -200,8 +200,8 @@ app.use("/api/stories", require("./routes/publicStories.routes"));
 
 
 
-// 555checking zero down with deployment 
-
+//checking zero down with deployment 
+// checking the new system update is added to aws 
 app.get("/", (req, res) => {
   res.json({
     status: "OK",
