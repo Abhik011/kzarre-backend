@@ -195,6 +195,9 @@ app.use("/api/admin/seo", require("./routes/adminSEO"));
 app.use("/api/admin/ads", require("./routes/adminAds"));
 app.use("/api/crm", require("./routes/adminCRM"));
 app.use("/cms", require("./routes/cmsFont"));
+app.use("/api/admin/stories", require("./routes/adminStories.routes"));
+app.use("/api/stories", require("./routes/publicStories.routes"));
+
 
 
 // 555checking zero down with deployment 

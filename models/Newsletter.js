@@ -2,9 +2,21 @@ const mongoose = require("mongoose");
 
 const NewsletterSchema = new mongoose.Schema(
   {
-    subject: String,
-    content: String,
-    sent: { type: Boolean, default: false },
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
+    },
+    source: {
+      type: String,
+      default: "footer",
+    },
+    subscribedAt: {
+      type: Date,
+      default: Date.now,
+    },
   },
   { timestamps: true }
 );

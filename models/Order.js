@@ -34,19 +34,18 @@ const orderSchema = new mongoose.Schema({
   paymentId: String,
   orderId: String,
 
-  status: {
-    type: String,
-    enum: [
-      "conform",
-      "pending",
-      "paid",
-      "failed",
-      "shipped",
-      "delivered",
-      "cancelled"
-    ],
-    default: "pending",
-  },
+status: {
+  type: String,
+  enum: [
+    "pending_payment",
+    "paid",
+    "failed",
+    "cancelled",
+    "shipped",
+    "delivered"
+  ],
+  default: "pending_payment",
+},
 
   // ✅✅✅ REQUIRED FOR STRIPE STOCK SAFETY
   stockReduced: { type: Boolean, default: false },

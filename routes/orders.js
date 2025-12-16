@@ -15,6 +15,40 @@ function adminAuth(req, res, next) {
 }
 
 // ==================================================
+// ⭐ 6. TOP ORDERS (FOR DASHBOARD)
+// ==================================================
+router.get("/top", async (req, res) => {
+  try {
+    const limit = Number(req.query.limit) || 5;
+
+    const orders = await Order.find()
+      .sort({ createdAt: -1 })     // latest orders
+      .limit(limit)
+      .select("orderId amount status createdAt customerName email");
+
+    const formatted = orders.map((o) => ({
+      _id: o.orderId,
+      customer: o.address?.name || o.userId?.name || o.email || "",
+
+      amount: o.amount,
+      status: o.status,
+      createdAt: o.createdAt,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      orders: formatted,
+    });
+  } catch (err) {
+    console.error("TOP ORDERS ERROR:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch top orders",
+    });
+  }
+});
+
+// ==================================================
 // 1. COD ORDER
 // ==================================================
 // router.post("/cod", async (req, res) => {

@@ -7,6 +7,25 @@ const path = require("path");
 const Product = require("../models/product");
 
 // ==================================================
+// 🔧 VARIANT HELPERS (CRITICAL FIX)
+// ==================================================
+const normalizeVariants = (variants = []) => {
+  return variants.map(v => ({
+    size: v.size?.trim(),
+    color: v.color?.trim(),
+    stock: Number(v.stock || 0),
+    price: v.price ? Number(v.price) : undefined,
+  }));
+};
+
+const calculateStockQuantity = (variants = []) => {
+  return variants.reduce(
+    (sum, v) => sum + Number(v.stock || 0),
+    0
+  );
+};
+
+// ==================================================
 // AWS CONFIG
 // ==================================================
 const allowedTypes = [
@@ -20,8 +39,7 @@ const allowedTypes = [
 
 const fileFilter = (req, file, cb) => {
   if (!allowedTypes.includes(file.mimetype)) {
-    console.warn(`⚠️ File rejected: ${file.originalname} (${file.mimetype})`);
-    return cb(new Error("Only image files are allowed"), false);
+    return cb(new Error("Only image files allowed"), false);
   }
   cb(null, true);
 };
@@ -45,7 +63,7 @@ const upload = multer({
 });
 
 // ==================================================
-// SAFE JSON PARSER
+// SAFE JSON
 // ==================================================
 const safeJSON = (val, fallback = []) => {
   try {
@@ -56,7 +74,7 @@ const safeJSON = (val, fallback = []) => {
 };
 
 // ==================================================
-// HELPER → UPLOAD TO S3
+// S3 UPLOAD
 // ==================================================
 async function uploadToS3(file) {
   const fileName = `products/${crypto.randomBytes(8).toString("hex")}${path.extname(
@@ -76,23 +94,21 @@ async function uploadToS3(file) {
 }
 
 // ==================================================
-// 🚀 BULK PRODUCT UPLOAD
+// 🚀 BULK UPLOAD (FIXED)
 // ==================================================
 router.post("/upload/bulk", upload.array("images", 20), async (req, res) => {
   try {
     const parsedProducts = safeJSON(req.body.products, []);
-
-    if (!parsedProducts.length)
-      return res.status(400).json({ success: false, message: "No product data provided" });
-
-    if (!req.files?.length)
-      return res.status(400).json({ success: false, message: "No images uploaded" });
+    if (!parsedProducts.length) {
+      return res.status(400).json({ success: false, message: "No product data" });
+    }
 
     const imageUrls = await Promise.all(req.files.map(uploadToS3));
-
     const saved = [];
 
     parsedProducts.forEach((p, index) => {
+      const normalizedVariants = normalizeVariants(p.variants || []);
+
       saved.push(
         new Product({
           name: p.name,
@@ -103,12 +119,13 @@ router.post("/upload/bulk", upload.array("images", 20), async (req, res) => {
 
           tags: p.tags || [],
           gender: p.gender || [],
-          variants: p.variants || [],
+
+          variants: normalizedVariants,
+          stockQuantity: calculateStockQuantity(normalizedVariants),
 
           imageUrl: imageUrls[index] || imageUrls[0],
           gallery: imageUrls.slice(index * 2, index * 2 + 2),
 
-          // NEW FIELDS
           notes: p.notes || "",
           terms: p.terms || "",
           materialDetails: p.materialDetails || "",
@@ -118,7 +135,6 @@ router.post("/upload/bulk", upload.array("images", 20), async (req, res) => {
           specifications: p.specifications || {},
           faq: p.faq || [],
           customerPhotos: p.customerPhotos || [],
-
           uploadedBy: null,
         })
       );
@@ -126,211 +142,161 @@ router.post("/upload/bulk", upload.array("images", 20), async (req, res) => {
 
     await Product.insertMany(saved);
 
-    return res.status(201).json({
-      success: true,
-      message: `Uploaded ${saved.length} products successfully`,
-      products: saved,
-    });
-
-  } catch (err) {
-    console.error("Bulk upload error:", err);
-    res.status(500).json({ success: false, message: "Server error", error: err.message });
-  }
-});
-
-
-
-router.post("/upload", upload.fields([
-  { name: "images", maxCount: 10 },
-  { name: "customerPhotos", maxCount: 10 }
-]), async (req, res) => {
-  try {
-    const {
-      name,
-      description,
-      price,
-      category,
-      vendor,
-      tags,
-      gender,
-      variants,
-
-      highlights,
-      materialDetails,
-      careInstructions,
-      notes,
-      terms,
-      specifications,
-      faq,
-
-      existingGallery,
-      existingCustomerPhotos,
-      productId
-    } = req.body;
-
-    // Required fields
-    if (!name || !category || !price) {
-      return res.status(400).json({ success: false, message: "Missing name, category, or price" });
-    }
-
-    // Parse JSON fields
-    const parseJSON = (str) => {
-      try { return JSON.parse(str); } catch { return []; }
-    };
-
-    const parsedTags = parseJSON(tags);
-    const parsedGender = parseJSON(gender);
-    const parsedVariants = parseJSON(variants);
-    const parsedSpecs = parseJSON(specifications);
-    const parsedFaq = parseJSON(faq);
-    const oldGallery = parseJSON(existingGallery);
-    const oldCustomerPhotos = parseJSON(existingCustomerPhotos);
-
-    // 1️⃣  Upload new images to S3
-    let newGallery = [];
-    if (req.files?.images) {
-      newGallery = await Promise.all(req.files.images.map(uploadToS3));
-    }
-
-    // 2️⃣ Upload new customer photos
-    let newCustPhotos = [];
-    if (req.files?.customerPhotos) {
-      newCustPhotos = await Promise.all(req.files.customerPhotos.map(uploadToS3));
-    }
-
-    // 3️⃣ Merge existing + new gallery images
-    const finalGallery = [...oldGallery, ...newGallery];
-
-    // 4️⃣ Merge existing + new customer photos
-    const finalCustomerPhotos = [...oldCustomerPhotos, ...newCustPhotos];
-
-    let product;
-
-    // 5️⃣ EDIT MODE (productId exists)
-    if (productId) {
-      product = await Product.findByIdAndUpdate(
-        productId,
-        {
-          name,
-          description,
-          price,
-          category,
-          vendor,
-          tags: parsedTags,
-          gender: parsedGender,
-          variants: parsedVariants,
-
-          highlights,
-          materialDetails,
-          careInstructions,
-          notes,
-          terms,
-          specifications: parsedSpecs,
-          faq: parsedFaq,
-
-          imageUrl: finalGallery[0] || "",
-          gallery: finalGallery,
-          customerPhotos: finalCustomerPhotos
-        },
-        { new: true }
-      );
-
-      return res.status(200).json({
-        success: true,
-        message: "Product updated successfully",
-        product
-      });
-    }
-
-    // 6️⃣ CREATE MODE
-    if (finalGallery.length === 0) {
-      return res.status(400).json({ success: false, message: "At least one image required" });
-    }
-
-    product = new Product({
-      name,
-      description,
-      price,
-      category,
-      vendor,
-      tags: parsedTags,
-      gender: parsedGender,
-      variants: parsedVariants,
-
-      highlights,
-      materialDetails,
-      careInstructions,
-      notes,
-      terms,
-      specifications: parsedSpecs,
-      faq: parsedFaq,
-
-      imageUrl: finalGallery[0],
-      gallery: finalGallery,
-      customerPhotos: finalCustomerPhotos,
-      uploadedBy: null
-    });
-
-    await product.save();
-
     res.status(201).json({
       success: true,
-      message: "Product created successfully",
-      product
+      message: `Uploaded ${saved.length} products`,
+      products: saved,
     });
-
   } catch (err) {
-    console.error("Upload error:", err);
-    res.status(500).json({ success: false, message: "Server error", error: err.message });
+    console.error("Bulk upload error:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
+// ==================================================
+// 🚀 CREATE / EDIT PRODUCT (FIXED)
+// ==================================================
+router.post(
+  "/upload",
+  upload.fields([
+    { name: "images", maxCount: 10 },
+    { name: "customerPhotos", maxCount: 10 },
+  ]),
+  async (req, res) => {
+    try {
+      const {
+        name,
+        description,
+        price,
+        category,
+        vendor,
+        tags,
+        gender,
+        variants,
+        highlights,
+        materialDetails,
+        careInstructions,
+        notes,
+        terms,
+        specifications,
+        faq,
+        existingGallery,
+        existingCustomerPhotos,
+        productId,
+      } = req.body;
 
+      if (!name || !category || !price) {
+        return res.status(400).json({ success: false, message: "Missing fields" });
+      }
+
+      const parsedVariants = safeJSON(variants, []);
+      const normalizedVariants = normalizeVariants(parsedVariants);
+      const stockQuantity = calculateStockQuantity(normalizedVariants);
+
+      const oldGallery = safeJSON(existingGallery, []);
+      const oldCustomerPhotos = safeJSON(existingCustomerPhotos, []);
+
+      let newGallery = [];
+      if (req.files?.images) {
+        newGallery = await Promise.all(req.files.images.map(uploadToS3));
+      }
+
+      let newCustomerPhotos = [];
+      if (req.files?.customerPhotos) {
+        newCustomerPhotos = await Promise.all(req.files.customerPhotos.map(uploadToS3));
+      }
+
+      const finalGallery = [...oldGallery, ...newGallery];
+      const finalCustomerPhotos = [...oldCustomerPhotos, ...newCustomerPhotos];
+
+      // ✏️ EDIT
+      if (productId) {
+        const product = await Product.findByIdAndUpdate(
+          productId,
+          {
+            name,
+            description,
+            price,
+            category,
+            vendor,
+            tags: safeJSON(tags),
+            gender: safeJSON(gender),
+
+            variants: normalizedVariants,
+            stockQuantity,
+
+            highlights,
+            materialDetails,
+            careInstructions,
+            notes,
+            terms,
+            specifications: safeJSON(specifications),
+            faq: safeJSON(faq),
+
+            imageUrl: finalGallery[0] || "",
+            gallery: finalGallery,
+            customerPhotos: finalCustomerPhotos,
+          },
+          { new: true }
+        );
+
+        return res.json({ success: true, product });
+      }
+
+      // ➕ CREATE
+      const product = new Product({
+        name,
+        description,
+        price,
+        category,
+        vendor,
+        tags: safeJSON(tags),
+        gender: safeJSON(gender),
+
+        variants: normalizedVariants,
+        stockQuantity,
+
+        highlights,
+        materialDetails,
+        careInstructions,
+        notes,
+        terms,
+        specifications: safeJSON(specifications),
+        faq: safeJSON(faq),
+
+        imageUrl: finalGallery[0],
+        gallery: finalGallery,
+        customerPhotos: finalCustomerPhotos,
+        uploadedBy: null,
+      });
+
+      await product.save();
+
+      res.status(201).json({ success: true, product });
+    } catch (err) {
+      console.error("Upload error:", err);
+      res.status(500).json({ success: false, message: err.message });
+    }
+  }
+);
 
 // ==================================================
-// 🚀 GET ALL PRODUCTS
+// 🚀 GET PRODUCTS
 // ==================================================
 router.get("/", async (req, res) => {
-  try {
-    const products = await Product.find().sort({ createdAt: -1 });
-    res.json({ success: true, count: products.length, products });
-  } catch (err) {
-    console.error("Fetch error:", err);
-    res.status(500).json({ success: false, message: "Server error", error: err.message });
-  }
+  const products = await Product.find().sort({ createdAt: -1 });
+  res.json({ success: true, products });
 });
 
-// ==================================================
-// 🚀 GET SINGLE PRODUCT (FULL DETAILS)
-// ==================================================
 router.get("/:id", async (req, res) => {
-  try {
-    const product = await Product.findById(req.params.id);
-
-    if (!product)
-      return res.status(404).json({ success: false, message: "Product not found" });
-
-    res.json({ success: true, product });
-
-  } catch (err) {
-    console.error("Get product error:", err);
-    res.status(500).json({ success: false, message: "Server error", error: err.message });
-  }
+  const product = await Product.findById(req.params.id);
+  if (!product) return res.status(404).json({ success: false });
+  res.json({ success: true, product });
 });
 
 router.delete("/:id", async (req, res) => {
-  try {
-    const deleted = await Product.findByIdAndDelete(req.params.id);
-
-    if (!deleted)
-      return res.status(404).json({ success: false, message: "Product not found" });
-
-    res.json({ success: true, message: "Product deleted successfully" });
-
-  } catch (err) {
-    console.error("Delete error:", err);
-    res.status(500).json({ success: false, message: "Server error", error: err.message });
-  }
+  await Product.findByIdAndDelete(req.params.id);
+  res.json({ success: true });
 });
 
 module.exports = router;

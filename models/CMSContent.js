@@ -30,25 +30,55 @@ const CMSContentSchema = new mongoose.Schema(
       default: "",
     },
 
-    // ⭐ NEW — Banner Styling Data from CMS Admin
-   bannerStyle: {
-  titleColor: { type: String, default: "" },
-  titleSize: { type: String, default: "" },
-  titleFont: { type: String, default: "" },
+    // ⭐ Banner Styling
+    bannerStyle: {
+      titleColor: { type: String, default: "" },
+      titleSize: { type: String, default: "" },
+      titleFont: { type: String, default: "" },
 
-  descColor: { type: String, default: "" },
-  descSize: { type: String, default: "" },
-  descFont: { type: String, default: "" },
+      descColor: { type: String, default: "" },
+      descSize: { type: String, default: "" },
+      descFont: { type: String, default: "" },
 
-  alignment: { type: String, default: "left" }
-},
-
+      alignment: { type: String, default: "left" },
+    },
 
     media: {
       url: String,
       name: String,
       kind: String,
       displayTo: String,
+    },
+
+    mediaGroup: [
+      {
+        imageUrl: String,
+        title: String,
+        description: String,
+        metaTag: String,
+        metaDescription: String,
+        keywords: String,
+        order: Number,
+      },
+    ],
+
+    heroVideoUrl: String,
+
+    // ✅ SCHEDULING (NEW)
+    visibleAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+
+    publishedNotified: {
+  type: Boolean,
+  default: false,
+},
+
+    timezone: {
+      type: String,
+      default: "America/New_York",
     },
 
     meta: {
@@ -63,24 +93,11 @@ const CMSContentSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["Pending Review", "Approved", "Rejected", "Draft"],
+      enum: ["Pending Review", "Approved", "Rejected", "Draft", "Scheduled"],
       default: "Pending Review",
     },
 
     rejectionReason: String,
-    heroVideoUrl: String,
-
-    mediaGroup: [
-      {
-        imageUrl: String,
-        title: String,
-        description: String,
-        metaTag: String,
-        metaDescription: String,
-        keywords: String,
-        order: Number,
-      },
-    ],
 
     banners: [
       {

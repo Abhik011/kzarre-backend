@@ -6,6 +6,15 @@ const crypto = require("crypto");
 const CMSContent = require("../models/CMSContent");
 require("dotenv").config();
 const CMSFont = require("../models/CMSFont");
+const { DateTime } = require("luxon");
+const BRAND_TIMEZONE = "America/New_York"; // ✅ New Jersey
+const Product = require("../models/Product");
+const { sendNotification } = require("../utils/notify");
+const compressVideo = require("../utils/compressVideo");
+const compressImage = require("../utils/compressImage");
+
+
+
 
 // =============================
 // 🔹 AWS S3 Setup
@@ -31,36 +40,71 @@ const s3 = new S3Client({
 const storage = multer.memoryStorage();
 const upload = multer({ storage }); // ✅ Do NOT call .any() here
 
-const uploadToS3 = async (file, displayTo) => {
-  try {
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
+
+const uploadToS3 = async (file, displayTo = "") => {
+
+try {
     let folder = "cms/others";
-    if (displayTo === "home-landing-video") folder = "cms/videos";
-    else if (displayTo === "home-banner") folder = "cms/images/banners";
-    else if (displayTo === "men-page-video") folder = "cms/videos/men";
-    else if (displayTo === "women-page-video") folder = "cms/videos/women";
-    else if (displayTo === "accessories-video")
-      folder = "cms/videos/accessories";
-    else if (displayTo === "heritage-video") folder = "cms/videos/heritage";
+    if (displayTo.includes("video")) folder = "cms/videos";
+    else if (displayTo.includes("grid") || displayTo.includes("banner"))
+      folder = "cms/images";
     else if (displayTo === "post") folder = "cms/images/posts";
     else if (displayTo === "about-page") folder = "cms/images/about";
     else if (displayTo === "product-page") folder = "cms/images/products";
 
-    const fileName = `${crypto.randomBytes(8).toString("hex")}-${
-      file.originalname
-    }`;
+    let buffer = file.buffer;
+    let contentType = file.mimetype;
+
+if (file.mimetype.startsWith("image/")) {
+  buffer = await compressImage(file.buffer, file.mimetype);
+  contentType = "image/webp";
+}
+
+    if (file.mimetype.startsWith("video/")) {
+      const tempDir = os.tmpdir();
+      const inputPath = path.join(
+        tempDir,
+        `${Date.now()}-${file.originalname}`
+      );
+      const outputPath = path.join(
+  tempDir,
+  `${Date.now()}-compressed.mp4`
+);
+
+
+      fs.writeFileSync(inputPath, file.buffer);
+
+      await compressVideo(inputPath, outputPath);
+
+      buffer = fs.readFileSync(outputPath);
+      contentType = "video/mp4";
+
+      // cleanup
+      fs.unlinkSync(inputPath);
+      fs.unlinkSync(outputPath);
+    }
+
+    const fileName = `${crypto.randomBytes(8).toString("hex")}-${file.originalname}`;
     const key = `${folder}/${fileName}`;
 
-    const params = {
-      Bucket: process.env.AWS_BUCKET_NAME,
-      Key: key,
-      Body: file.buffer,
-      ContentType: file.mimetype,
-    };
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: process.env.AWS_BUCKET_NAME,
+        Key: key,
+        Body: buffer,
+        ContentType: contentType,
 
-    await s3.send(new PutObjectCommand(params));
+        // 🚀 VERY IMPORTANT FOR SPEED
+        CacheControl: "public, max-age=31536000, immutable",
+      })
+    );
+
     const fileUrl = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
 
-    console.log(`✅ Uploaded to S3: ${fileUrl}`);
+    console.log("✅ Optimized upload:", fileUrl);
     return fileUrl;
   } catch (err) {
     console.error("❌ uploadToS3 Error:", err);
@@ -68,12 +112,6 @@ const uploadToS3 = async (file, displayTo) => {
   }
 };
 
-// =============================
-// ✅ Save CMS Content (Create Post)
-// =============================
-// =============================
-// ✅ Save CMS Content (Create Post)
-// =============================
 
 router.post("/save", upload.any(), async (req, res) => {
   try {
@@ -120,14 +158,14 @@ router.post("/save", upload.any(), async (req, res) => {
     let mediaGroup = [];
 
     // NEW: Banner Styling
-let parsedBannerStyle = {};
-if (req.body.bannerStyle) {
-  try {
-    parsedBannerStyle = JSON.parse(req.body.bannerStyle);
-  } catch (err) {
-    console.log("❌ Invalid bannerStyle JSON:", err);
-  }
-}
+    let parsedBannerStyle = {};
+    if (req.body.bannerStyle) {
+      try {
+        parsedBannerStyle = JSON.parse(req.body.bannerStyle);
+      } catch (err) {
+        console.log("❌ Invalid bannerStyle JSON:", err);
+      }
+    }
 
     // ============================================
     // 1️⃣ Home Landing Video
@@ -226,7 +264,7 @@ if (req.body.bannerStyle) {
             ? arrKeywords[i].join(",")
             : arrKeywords[i] || "",
           order: i + 1,
-              style: parsedBannerStyle
+          style: parsedBannerStyle
         }))
       );
     }
@@ -248,37 +286,66 @@ if (req.body.bannerStyle) {
       };
     }
 
-    // ============================================
-    // 6️⃣ Save to MongoDB
-    // ============================================
-// ============================================
-// 6️⃣ Save to MongoDB
-// ============================================
-const saved = await CMSContent.create({
-  title,
-  description,
-  displayTo: displayToValue,
-  heroVideoUrl,
-  media,
-  mediaGroup,
+    let visibleAt = null;
 
-  // NEW FIELD — save banner styles
-  bannerStyle: parsedBannerStyle,
+    if (visibleDate && visibleTime) {
+      visibleAt = DateTime.fromISO(
+        `${visibleDate}T${visibleTime}`,
+        { zone: BRAND_TIMEZONE }
+      )
+        .toUTC()
+        .toJSDate();
+    }
 
-  meta: {
-    tag: metaTag,
-    description: metaDescription,
-    keywords: cleanKeywords,
-    visibleDate,
-    visibleTime,
-  },
+    const saved = await CMSContent.create({
+      title,
+      description,
+      displayTo: displayToValue,
+      heroVideoUrl,
+      media,
+      mediaGroup,
 
-  author: "Admin",
-  status: "Pending Review",
-});
+      bannerStyle: parsedBannerStyle,
 
+      // ✅ NEW
+      visibleAt,
+      timezone: BRAND_TIMEZONE,
 
+      meta: {
+        tag: metaTag,
+        description: metaDescription,
+        keywords: cleanKeywords,
+        visibleDate,
+        visibleTime,
+      },
 
+      author: "Admin",
+
+      // ✅ AUTO STATUS
+      status: visibleAt && visibleAt > new Date()
+        ? "Scheduled"
+        : "Pending Review",
+    });
+    // 🔔 SEND CMS NOTIFICATION
+
+    if (saved.status === "Scheduled") {
+      sendNotification({
+        type: "cms-scheduled",
+        title: "Content Scheduled",
+        message: `CMS content "${saved.title}" scheduled for ${visibleDate} ${visibleTime} (New Jersey time)`,
+        cmsId: saved._id,
+        displayTo: saved.displayTo,
+        visibleAt: saved.visibleAt,
+      });
+    } else {
+      sendNotification({
+        type: "cms-submitted",
+        title: "Content Submitted",
+        message: `CMS content "${saved.title}" submitted for review`,
+        cmsId: saved._id,
+        displayTo: saved.displayTo,
+      });
+    }
     res.json({ success: true, message: "Saved (Pending Review)", saved });
   } catch (err) {
     console.error("❌ Error:", err);
@@ -286,9 +353,6 @@ const saved = await CMSContent.create({
   }
 });
 
-// =============================
-// ✅ Get All CMS (Admin Panel)
-// =============================
 router.get("/", async (req, res) => {
   try {
     const cmsContent = await CMSContent.find().sort({ createdAt: -1 });
@@ -298,9 +362,6 @@ router.get("/", async (req, res) => {
   }
 });
 
-// ==================================================
-// ✅ GET SIMILAR PRODUCTS
-// ==================================================
 router.get("/similar/:id", async (req, res) => {
   try {
     const current = await Product.findById(req.params.id);
@@ -335,7 +396,18 @@ router.get("/similar/:id", async (req, res) => {
 // =============================
 router.get("/public", async (req, res) => {
   try {
-    const all = await CMSContent.find({ status: "Approved" });
+    const now = new Date();
+
+    const all = await CMSContent.find({
+      $or: [
+        { status: "Approved" },
+        {
+          status: "Scheduled",
+          visibleAt: { $lte: now }
+        }
+      ]
+    });
+
     const allFonts = await CMSFont.find();
 
     const response = {
@@ -471,7 +543,10 @@ router.get("/public", async (req, res) => {
       style: f.fontStyle,
     }));
 
+
     return res.json(response);
+
+
 
   } catch (err) {
     console.error("❌ Public CMS Error:", err);
@@ -519,11 +594,6 @@ router.post("/upload-font", upload.single("font"), async (req, res) => {
   }
 });
 
-
-
-// =============================
-// ✅ Approve / Reject (Admin Only)
-// =============================
 router.patch("/approve/:id", async (req, res) => {
   try {
     const post = await CMSContent.findByIdAndUpdate(
@@ -576,65 +646,189 @@ router.get("/:id", async (req, res) => {
 
 router.put("/update/:id", upload.any(), async (req, res) => {
   try {
-    const id = req.params.id;
+    const existing = await CMSContent.findById(req.params.id);
+    if (!existing) return res.status(404).json({ error: "Content not found" });
 
-    const existing = await CMSContent.findById(id);
-    if (!existing) {
-      return res.status(404).json({ error: "Content not found" });
+    const prevStatus = existing.status; // ✅ ADD THIS
+
+
+    /* ===============================
+       BASIC FIELDS
+    =============================== */
+    existing.title = req.body.title ?? existing.title;
+    existing.description = req.body.description ?? existing.description;
+    const displayTo = req.body.displayTo ?? existing.displayTo;
+    existing.displayTo = displayTo;
+
+
+    /* ===============================
+       META
+    =============================== */
+    existing.meta = {
+      tag: req.body.metaTag ?? existing.meta?.tag,
+      description: req.body.metaDescription ?? existing.meta?.description,
+      keywords: req.body.keywords ?? existing.meta?.keywords,
+      visibleDate: req.body.visibleDate ?? existing.meta?.visibleDate,
+      visibleTime: req.body.visibleTime ?? existing.meta?.visibleTime,
+    };
+    /* ===============================
+   ⏰ TIMEZONE SCHEDULING (NEW JERSEY)
+=============================== */
+    if (req.body.visibleDate && req.body.visibleTime) {
+      existing.visibleAt = DateTime.fromISO(
+        `${req.body.visibleDate}T${req.body.visibleTime}`,
+        { zone: BRAND_TIMEZONE }
+      )
+        .toUTC()        // always store UTC
+        .toJSDate();
+
+      existing.timezone = BRAND_TIMEZONE;
+
+      // Auto schedule if future time
+      if (existing.visibleAt > new Date()) {
+        existing.status = "Scheduled";
+      }
+    }
+    if (!req.body.visibleDate || !req.body.visibleTime) {
+      existing.visibleAt = null;
+
+      if (existing.status === "Scheduled") {
+        existing.status = "Pending Review";
+      }
     }
 
-    // Parse bannerStyle JSON if exists
-    let bannerStyle = existing.bannerStyle;
+
     if (req.body.bannerStyle) {
       try {
-        bannerStyle = JSON.parse(req.body.bannerStyle);
-      } catch (e) {}
+        existing.bannerStyle = JSON.parse(req.body.bannerStyle);
+      } catch { }
     }
 
-    // Update main fields
-    existing.title = req.body.title || existing.title;
-    existing.description = req.body.description || existing.description;
-    existing.displayTo = req.body.displayTo || existing.displayTo;
+    /* ===============================
+       FILES
+    =============================== */
+    const files = req.files || [];
 
-    // Meta fields
-    existing.meta = {
-      tag: req.body.metaTag || existing.meta.tag,
-      description: req.body.metaDescription || existing.meta.description,
-      keywords: req.body.keywords || existing.meta.keywords,
-      visibleDate: req.body.visibleDate || existing.meta.visibleDate,
-      visibleTime: req.body.visibleTime || existing.meta.visibleTime,
-    };
+    const imageFiles = files.filter(f => f.mimetype.startsWith("image/"));
+    const videoFile = files.find(f => f.mimetype.startsWith("video/"));
 
-    existing.bannerStyle = bannerStyle;
+    /* ===============================
+       VIDEO UPDATE
+    =============================== */
+    if (videoFile) {
+      const videoUrl = await uploadToS3(videoFile, existing.displayTo);
 
-    /* ------------------------------
-       FILE UPLOAD HANDLING (SINGLE)
-    ------------------------------- */
-    if (req.file) {
-      existing.media = req.file.location;
+      existing.media = {
+        url: videoUrl,
+        name: videoFile.originalname,
+        kind: "video",
+        displayTo: existing.displayTo,
+      };
+
+      existing.heroVideoUrl = videoUrl;
     }
 
-    /* ------------------------------
-       MULTI FILE (GRID / CAROUSEL)
-    ------------------------------- */
-    if (req.files && req.files.length > 0) {
+    /* ===============================
+       SINGLE IMAGE UPDATE
+    =============================== */
+    if (
+      imageFiles.length === 1 &&
+      !["women-4grid", "men-4grid", "women-grid", "men-grid", "home-banner-carousel"].includes(existing.displayTo)
+    ) {
+      const imgUrl = await uploadToS3(imageFiles[0], existing.displayTo);
+
+      existing.media = {
+        url: imgUrl,
+        name: imageFiles[0].originalname,
+        kind: "image",
+        displayTo: existing.displayTo,
+      };
+    }
+
+    /* ===============================
+       GRID / CAROUSEL UPDATE
+    =============================== */
+    if (imageFiles.length > 1) {
       const titles = JSON.parse(req.body.titles || "[]");
       const descriptions = JSON.parse(req.body.descriptions || "[]");
+      const metaTags = JSON.parse(req.body.metaTags || "[]");
+      const metaDescriptions = JSON.parse(req.body.metaDescriptions || "[]");
+      const keywords = JSON.parse(req.body.imageKeywords || "[]");
 
-      existing.mediaGroup = req.files.map((file, i) => ({
-        imageUrl: file.location,
-        title: titles[i] || "",
-        description: descriptions[i] || "",
+      existing.mediaGroup = await Promise.all(
+        imageFiles.map(async (file, i) => ({
+          imageUrl: await uploadToS3(file, existing.displayTo),
+          title: titles[i] || "",
+          description: descriptions[i] || "",
+          metaTag: metaTags[i] || "",
+          metaDescription: metaDescriptions[i] || "",
+          keywords: keywords[i] || "",
+          order: i + 1,
+          style: existing.bannerStyle || {},
+        }))
+      );
+    }
+
+    /* ===============================
+       KEEP EXISTING FILES (NO REUPLOAD)
+    =============================== */
+    if (!files.length && req.body.existingFiles) {
+      const urls = Array.isArray(req.body.existingFiles)
+        ? req.body.existingFiles
+        : [req.body.existingFiles];
+
+      existing.mediaGroup = urls.map((url, i) => ({
+        imageUrl: url,
         order: i + 1,
+        style: existing.bannerStyle || {},
       }));
     }
 
-    await existing.save();
+    // 🔔 CMS SCHEDULING NOTIFICATION
+    
 
+
+    await existing.save();
+if (prevStatus !== "Scheduled" && existing.status === "Scheduled") {
+      sendNotification({
+        type: "cms-scheduled",
+        title: "Content Scheduled",
+        message: `CMS content "${existing.title}" scheduled for ${req.body.visibleDate} ${req.body.visibleTime} (New Jersey time)`,
+        cmsId: existing._id,
+        displayTo: existing.displayTo,
+        visibleAt: existing.visibleAt,
+      });
+    }
+
+    if (prevStatus === "Scheduled" && existing.status !== "Scheduled") {
+      sendNotification({
+        type: "cms-unscheduled",
+        title: "Content Schedule Removed",
+        message: `CMS content "${existing.title}" schedule was removed`,
+        cmsId: existing._id,
+      });
+    }
     res.json({ success: true, updated: existing });
   } catch (err) {
     console.error("UPDATE CMS ERROR:", err);
-    res.status(500).json({ error: "Server error" });
+    res.status(500).json({ error: err.message });
   }
 });
+
+router.delete("/delete/:id", async (req, res) => {
+  try {
+    const deleted = await CMSContent.findByIdAndDelete(req.params.id);
+
+    if (!deleted) {
+      return res.status(404).json({ error: "Content not found" });
+    }
+
+    res.json({ success: true, message: "Deleted successfully" });
+  } catch (err) {
+    console.error("DELETE CMS ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 module.exports = router;

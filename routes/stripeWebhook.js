@@ -2,153 +2,133 @@ const express = require("express");
 const router = express.Router();
 const Stripe = require("stripe");
 const Order = require("../models/Order");
-const Product = require("../models/product");
+const { sendNotification } = require("../utils/notify");
+const { sendEmail } = require("../utils/sendEmail");
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
-router.post("/webhook", async (req, res) => {
-  console.log("✅✅✅ STRIPE WEBHOOK HIT ✅✅✅");
+/**
+ * ⚠️ IMPORTANT
+ * This route MUST use express.raw
+ */
+router.post(
+  "/webhook",
+  express.raw({ type: "application/json" }),
+  async (req, res) => {
+    console.log("✅ STRIPE WEBHOOK HIT");
 
-  const sig = req.headers["stripe-signature"];
-  let event;
+    let event;
+    const sig = req.headers["stripe-signature"];
 
-  try {
-    event = stripe.webhooks.constructEvent(
-      req.body,
-      sig,
-      process.env.STRIPE_WEBHOOK_SECRET
-    );
-  } catch (err) {
-    console.error("❌ Webhook signature failed:", err.message);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
-
-  try {
-    /* ✅ PAYMENT SUCCESS */
-    if (event.type === "checkout.session.completed") {
-      const session = event.data.object;
-
-      console.log("✅ SESSION METADATA:", session.metadata);
-
-      const orderId = session.metadata?.orderId;
-      if (!orderId) return res.json({ received: true });
-
-      const order = await Order.findOne({ orderId });
-
-      if (!order || order.status === "paid" || order.stockReduced === true) {
-        return res.json({ received: true });
-      }
-
-      // ✅ REDUCE STOCK
-      for (const item of order.items) {
-        const product = await Product.findById(item.product);
-        if (!product) continue;
-
-        console.log("✅ BEFORE STOCK:", product.stockQuantity);
-
-        if (product.variants?.length) {
-          const variant = product.variants.find(
-            v =>
-              v.size === item.size &&
-              (item.color ? v.color === item.color : true)
-          );
-
-          if (variant) {
-            variant.stock = Math.max(0, (variant.stock || 0) - item.qty);
-          }
-
-          product.stockQuantity = product.variants.reduce(
-            (sum, v) => sum + (v.stock || 0),
-            0
-          );
-        } else {
-          product.stockQuantity = Math.max(
-            0,
-            (product.stockQuantity || 0) - item.qty
-          );
-        }
-
-        await product.save();
-
-        console.log("✅ AFTER STOCK:", product.stockQuantity);
-      }
-
-      order.status = "paid";
-      order.paymentMethod = "STRIPE";
-      order.paymentId = session.payment_intent;
-      order.stockReduced = true;
-      await order.save();
-
-      console.log("✅ STRIPE PAYMENT CONFIRMED & STOCK REDUCED:", orderId);
+    try {
+      event = stripe.webhooks.constructEvent(
+        req.body,
+        sig,
+        process.env.STRIPE_WEBHOOK_SECRET
+      );
+    } catch (err) {
+      console.error("❌ Webhook signature error:", err.message);
+      return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
-    /* ❌ PAYMENT FAILED / EXPIRED */
-    if (
-      event.type === "checkout.session.expired" ||
-      event.type === "payment_intent.payment_failed"
-    ) {
-      const obj = event.data.object;
-      const orderId = obj.metadata?.orderId;
-      if (!orderId) return res.json({ received: true });
+    try {
+      /* ===============================
+         PAYMENT SUCCESS
+      =============================== */
+      if (event.type === "checkout.session.completed") {
+        const session = event.data.object;
+        const orderId = session.metadata?.orderId;
 
-      const order = await Order.findOne({ orderId });
+        if (!orderId) return res.json({ received: true });
 
-      if (
-        !order ||
-        ["paid", "cancelled", "refunded"].includes(order.status)
-      ) {
-        return res.json({ received: true });
-      }
+        const order = await Order.findOne({ orderId });
+        if (!order) return res.json({ received: true });
 
-      for (const item of order.items) {
-        const product = await Product.findById(item.product);
-        if (!product) continue;
-
-        if (product.variants?.length) {
-          const variant = product.variants.find(
-            v =>
-              v.size === item.size &&
-              (item.color ? v.color === item.color : true)
-          );
-          if (variant) variant.stock += item.qty;
-
-          product.stockQuantity = product.variants.reduce(
-            (sum, v) => sum + (v.stock || 0),
-            0
-          );
-        } else {
-          product.stockQuantity += item.qty;
+        // ✅ Already confirmed → idempotent
+        if (order.status === "conform") {
+          return res.json({ received: true });
         }
 
-        await product.save();
-      }
-
-      order.status = "failed";
-      order.paymentId = null;
-      order.stockReduced = false;
-      await order.save();
-    }
-
-    /* ✅ REFUND COMPLETED */
-    if (event.type === "charge.refunded") {
-      const charge = event.data.object;
-
-      const order = await Order.findOne({
-        paymentId: charge.payment_intent,
-      });
-
-      if (order) {
-        order.status = "refunded";
-        order.stockReduced = false;
+        // ✅ CONFIRM ORDER
+        order.status = "conform";
+        order.paymentMethod = "STRIPE";
+        order.paymentId = session.payment_intent;
         await order.save();
-      }
-    }
 
-    res.json({ received: true });
-  } catch (err) {
-    console.error("❌ WEBHOOK PROCESSING ERROR:", err);
-    res.status(500).json({ success: false });
+        // 🔔 ADMIN NOTIFICATION
+        sendNotification({
+          type: "order-confirmed",
+          title: "Order Confirmed",
+          message: `Order #${order.orderId} confirmed via Stripe`,
+          orderId: order._id,
+        });
+
+        // 📧 CUSTOMER EMAIL
+        if (order.email) {
+          await sendEmail(
+            order.email,
+            "Payment Successful – KZARRÈ",
+            `
+              <h2>Payment Successful ✅</h2>
+              <p><b>Order ID:</b> ${order.orderId}</p>
+              <p>Status: <b>Confirmed</b></p>
+            `
+          );
+        }
+
+        console.log("ORDER CONFIRMED:", orderId);
+      }
+
+      /* ===============================
+         PAYMENT FAILED / EXPIRED
+      =============================== */
+      if (
+        event.type === "checkout.session.expired" ||
+        event.type === "payment_intent.payment_failed"
+      ) {
+        const obj = event.data.object;
+        const orderId = obj.metadata?.orderId;
+        if (!orderId) return res.json({ received: true });
+
+        const order = await Order.findOne({ orderId });
+        if (!order) return res.json({ received: true });
+
+        // Already finalized
+        if (["conform", "refunded"].includes(order.status)) {
+          return res.json({ received: true });
+        }
+
+        order.status = "failed";
+        order.paymentId = null;
+        await order.save();
+
+        console.log("❌ PAYMENT FAILED:", orderId);
+      }
+
+      /* ===============================
+         REFUND COMPLETED
+      =============================== */
+      if (event.type === "charge.refunded") {
+        const charge = event.data.object;
+
+        const order = await Order.findOne({
+          paymentId: charge.payment_intent,
+        });
+
+        if (order) {
+          order.status = "refunded";
+          await order.save();
+
+          console.log("🔁 ORDER REFUNDED:", order.orderId);
+        }
+      }
+
+      res.json({ received: true });
+    } catch (err) {
+      console.error("❌ WEBHOOK HANDLER ERROR:", err);
+      res.status(500).json({ success: false });
+    }
   }
-});
+);
 
 module.exports = router;
