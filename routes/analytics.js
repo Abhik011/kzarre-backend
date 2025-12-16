@@ -267,7 +267,9 @@ router.get('/traffic/devices', async (req, res) => {
 router.get('/conversion-rate', async (req, res) => {
   try {
     const totalVisitors = await Traffic.countDocuments();
-    const totalOrders = await Order.countDocuments();
+   const totalOrders = await Order.countDocuments({
+  paymentStatus: "paid"
+});
     const rate = totalVisitors === 0 ? 0 : (totalOrders / totalVisitors) * 100;
 
     res.json({ success: true, visitors: totalVisitors, orders: totalOrders, conversionRate: Number(rate.toFixed(2)) });
@@ -282,10 +284,12 @@ router.get('/conversion-rate', async (req, res) => {
 // ---------------------------
 router.get('/repeat-customers', async (req, res) => {
   try {
-    const repeatCustomersAgg = await Order.aggregate([
-      { $group: { _id: '$customerId', orders: { $sum: 1 } } },
-      { $match: { orders: { $gte: 2 } } }
-    ]);
+   const repeatCustomersAgg = await Order.aggregate([
+  { $match: { paymentStatus: "paid" } },
+  { $group: { _id: '$customerId', orders: { $sum: 1 } } },
+  { $match: { orders: { $gte: 2 } } }
+]);
+
 
     res.json({ success: true, repeatCustomers: repeatCustomersAgg.length });
   } catch (err) {
@@ -330,7 +334,7 @@ router.get('/top-products', async (req, res) => {
   try {
     const products = await Order.aggregate([
       { $unwind: '$items' },
-      { $group: { _id: '$items.productId', sold: { $sum: '$items.quantity' } } },
+      { $group: { _id: '$items.product', sold: { $sum: '$items.quantity' } } },
       { $sort: { sold: -1 } },
       { $limit: 5 },
       { $lookup: { from: 'products', localField: '_id', foreignField: '_id', as: 'product' } },

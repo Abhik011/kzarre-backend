@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 
 const orderSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-
+  email: { type: String },
   items: [
     {
       product: { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
@@ -42,15 +42,14 @@ status: {
     "failed",
     "cancelled",
     "shipped",
-    "delivered"
+    "delivered",
+    "refunded",
   ],
   default: "pending_payment",
 },
+  
+stockReduced: { type: Boolean, default: false },
 
-  // ✅✅✅ REQUIRED FOR STRIPE STOCK SAFETY
-  stockReduced: { type: Boolean, default: false },
-
-  // ✅ SHIPMENT BLOCK
   shipment: {
     carrier: {
       type: String,

@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const Stripe = require("stripe");
 const Order = require("../models/Order");
+const Product = require("../models/product"); // ✅ REQUIRED
 const { sendNotification } = require("../utils/notify");
 const { sendEmail } = require("../utils/sendEmail");
 
@@ -38,24 +39,21 @@ router.post(
       if (event.type === "checkout.session.completed") {
         const session = event.data.object;
         const orderId = session.metadata?.orderId;
-
         if (!orderId) return res.json({ received: true });
 
         const order = await Order.findOne({ orderId });
         if (!order) return res.json({ received: true });
 
-        // ✅ Already confirmed → idempotent
-        if (order.status === "conform") {
+        // ✅ Idempotent
+        if (order.status === "paid") {
           return res.json({ received: true });
         }
 
-        // ✅ CONFIRM ORDER
-        order.status = "conform";
+        order.status = "paid";
         order.paymentMethod = "STRIPE";
         order.paymentId = session.payment_intent;
         await order.save();
 
-        // 🔔 ADMIN NOTIFICATION
         sendNotification({
           type: "order-confirmed",
           title: "Order Confirmed",
@@ -63,7 +61,6 @@ router.post(
           orderId: order._id,
         });
 
-        // 📧 CUSTOMER EMAIL
         if (order.email) {
           await sendEmail(
             order.email,
@@ -94,15 +91,43 @@ router.post(
         if (!order) return res.json({ received: true });
 
         // Already finalized
-        if (["conform", "refunded"].includes(order.status)) {
+        if (["paid", "refunded"].includes(order.status)) {
           return res.json({ received: true });
+        }
+
+        // 🔁 RESTORE STOCK (PRO LEVEL SAFETY)
+        if (order.stockReduced) {
+          for (const item of order.items) {
+            const product = await Product.findById(item.product);
+            if (!product) continue;
+
+            if (product.variants?.length) {
+              const v = product.variants.find(
+                v =>
+                  v.size === item.size &&
+                  (!item.color || v.color === item.color)
+              );
+              if (v) v.stock += item.qty;
+
+              product.stockQuantity = product.variants.reduce(
+                (sum, v) => sum + (v.stock || 0),
+                0
+              );
+            } else {
+              product.stockQuantity += item.qty;
+            }
+
+            await product.save();
+          }
+
+          order.stockReduced = false;
         }
 
         order.status = "failed";
         order.paymentId = null;
         await order.save();
 
-        console.log("❌ PAYMENT FAILED:", orderId);
+        console.log("❌ PAYMENT FAILED & STOCK RESTORED:", orderId);
       }
 
       /* ===============================
@@ -118,7 +143,6 @@ router.post(
         if (order) {
           order.status = "refunded";
           await order.save();
-
           console.log("🔁 ORDER REFUNDED:", order.orderId);
         }
       }
