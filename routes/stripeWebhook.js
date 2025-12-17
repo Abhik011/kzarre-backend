@@ -7,15 +7,14 @@ const { sendNotification } = require("../utils/notify");
 const { sendEmail } = require("../utils/sendEmail");
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-
 router.post(
   "/webhook",
   express.raw({ type: "application/json" }),
   async (req, res) => {
     console.log("✅ STRIPE WEBHOOK HIT");
 
-    let event;
     const sig = req.headers["stripe-signature"];
+    let event;
 
     try {
       event = stripe.webhooks.constructEvent(
@@ -28,15 +27,14 @@ router.post(
       return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
-    console.log("🔥 EVENT TYPE:", event.type);
-
     try {
-      /* ===============================
-         CHECKOUT SUCCESS (PRIMARY)
-      =============================== */
+      /* =====================================================
+         ✅ CHECKOUT SESSION COMPLETED (MAIN FLOW)
+      ===================================================== */
       if (event.type === "checkout.session.completed") {
         const session = event.data.object;
         const orderId = session.metadata?.orderId;
+
         if (!orderId) return res.json({ received: true });
 
         const order = await Order.findOne({ orderId });
@@ -49,31 +47,16 @@ router.post(
         order.paymentId = session.payment_intent;
         await order.save();
 
-        sendNotification({
-          type: "order-confirmed",
-          title: "Order Confirmed",
-          message: `Order #${order.orderId} confirmed via Stripe`,
-          orderId: order._id,
-        });
-
-        if (order.email) {
-          await sendEmail(
-            order.email,
-            "Payment Successful – KZARRÈ",
-            `<h2>Payment Successful ✅</h2>
-             <p><b>Order ID:</b> ${order.orderId}</p>`
-          );
-        }
-
         console.log("✅ ORDER CONFIRMED (CHECKOUT):", orderId);
       }
 
-      /* ===============================
-         PAYMENT INTENT SUCCESS (FALLBACK)
-      =============================== */
+      /* =====================================================
+         ✅ PAYMENT INTENT SUCCEEDED (CLI + FALLBACK)
+      ===================================================== */
       if (event.type === "payment_intent.succeeded") {
         const pi = event.data.object;
         const orderId = pi.metadata?.orderId;
+
         if (!orderId) return res.json({ received: true });
 
         const order = await Order.findOne({ orderId });
@@ -89,9 +72,9 @@ router.post(
         console.log("✅ ORDER CONFIRMED (PAYMENT_INTENT):", orderId);
       }
 
-      /* ===============================
-         PAYMENT FAILED / EXPIRED
-      =============================== */
+      /* =====================================================
+         ❌ PAYMENT FAILED / EXPIRED
+      ===================================================== */
       if (
         event.type === "checkout.session.expired" ||
         event.type === "payment_intent.payment_failed"
@@ -105,31 +88,6 @@ router.post(
           return res.json({ received: true });
         }
 
-        if (order.stockReduced) {
-          for (const item of order.items) {
-            const product = await Product.findById(item.product);
-            if (!product) continue;
-
-            if (product.variants?.length) {
-              const v = product.variants.find(
-                v =>
-                  v.size === item.size &&
-                  (!item.color || v.color === item.color)
-              );
-              if (v) v.stock += item.qty;
-              product.stockQuantity = product.variants.reduce(
-                (sum, v) => sum + (v.stock || 0),
-                0
-              );
-            } else {
-              product.stockQuantity += item.qty;
-            }
-
-            await product.save();
-          }
-          order.stockReduced = false;
-        }
-
         order.status = "failed";
         order.paymentId = null;
         await order.save();
@@ -137,11 +95,12 @@ router.post(
         console.log("❌ PAYMENT FAILED:", orderId);
       }
 
-      /* ===============================
-         REFUND
-      =============================== */
+      /* =====================================================
+         🔁 REFUND
+      ===================================================== */
       if (event.type === "charge.refunded") {
         const charge = event.data.object;
+
         const order = await Order.findOne({
           paymentId: charge.payment_intent,
         });
@@ -160,5 +119,6 @@ router.post(
     }
   }
 );
+
 
 module.exports = router;
