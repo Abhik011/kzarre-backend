@@ -166,6 +166,7 @@ app.use((req, res, next) => {
 // ROUTES
 // ----------------------------
 
+
 // app.use("/api/analytics",  require("./routes/analyticsRoutes"));
 app.use("/api/geoip", require("./routes/geoip"));
 app.use("/api/track", require("./routes/track"));
@@ -202,6 +203,7 @@ app.use("/api/admin/email-templates", require("./routes/admin/emailTemplates"));
 app.use("/api/admin/orders", require("./routes/admin/orders") );
 app.use("/api/admin/media", require("./routes/admin/media"));
 app.use("/api/profile", require("./routes/profile.routes"));
+app.use("/api/admin/system", require("./routes/admin/system"));
 
 
 app.get("/", (req, res) => {
