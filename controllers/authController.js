@@ -150,13 +150,16 @@ exports.login = async (req, res, next) => {
     // ✅ VERIFIED → LOGIN
     const token = generateToken(user);
 
-    res.cookie("kzarre_token", token, {
-      httpOnly: true,
-      secure: false, // true in prod
-      sameSite: "lax",
-      path: "/",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+   const isProd = process.env.NODE_ENV === "production";
+
+res.cookie("auth_token", token, {          // 🔥 NAME MUST MATCH /verify
+  httpOnly: true,
+  secure: isProd,                         // 🔥 true on Vercel
+  sameSite: isProd ? "none" : "lax",      // 🔥 required for cross-domain
+  path: "/",
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+});
+
 
     res.status(200).json({
       success: true,
