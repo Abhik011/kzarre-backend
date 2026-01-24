@@ -1,26 +1,23 @@
+// models/EmailTemplate.js
 const mongoose = require("mongoose");
 
-const BlockSchema = new mongoose.Schema({
-  type: String,
-  content: String,
-  src: String,
-  url: String,
-  color: String,
-  bgColor: String,
-  fontSize: Number,
-  padding: Number,
-  align: String,
-  radius: Number,
-});
+const EmailTemplateSchema = new mongoose.Schema({
+  name: { type: String, required: true },        // "Diwali Offer Template"
+  subject: { type: String, required: true },
 
-const SectionSchema = new mongoose.Schema({
-  background: String,
-  padding: Number,
-  blocks: [BlockSchema],
-});
+  // Editor blocks (structured)
+  blocks: [
+    {
+      type: { type: String, enum: ["text", "image", "button"], required: true },
+      html: String,              // pre-rendered html for this block
+      data: mongoose.Schema.Types.Mixed, // editor state (optional)
+    },
+  ],
 
-module.exports = mongoose.model("emailTemplate", {
-  name: String,
-  sections: [SectionSchema],
-  createdAt: { type: Date, default: Date.now },
-});
+  // Final compiled HTML (cached)
+  html: { type: String, required: true },
+
+  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "Admin" },
+}, { timestamps: true });
+
+module.exports = mongoose.model("emailtemplates", EmailTemplateSchema);

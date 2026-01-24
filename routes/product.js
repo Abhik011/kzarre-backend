@@ -5,6 +5,8 @@ const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const crypto = require("crypto");
 const path = require("path");
 const Product = require("../models/product");
+const Activity = require("../models/Activity");
+const accessAuth = require("../middlewares/accessAuth");
 
 // ==================================================
 // 🔧 VARIANT HELPERS (CRITICAL FIX)
@@ -96,7 +98,7 @@ async function uploadToS3(file) {
 // ==================================================
 // 🚀 BULK UPLOAD (FIXED)
 // ==================================================
-router.post("/upload/bulk", upload.array("images", 20), async (req, res) => {
+router.post("/upload/bulk", accessAuth, upload.array("images", 20), async (req, res) => {
   try {
     const parsedProducts = safeJSON(req.body.products, []);
     if (!parsedProducts.length) {
@@ -142,6 +144,25 @@ router.post("/upload/bulk", upload.array("images", 20), async (req, res) => {
 
     await Product.insertMany(saved);
 
+    // 🔥 ACTIVITY LOG: BULK PRODUCT UPLOAD
+    const ip =
+      req.headers["x-forwarded-for"]?.split(",")[0] ||
+      req.socket.remoteAddress;
+
+    await Activity.create({
+      
+           userId: req.user.id, 
+     userName: req.user.email,            // or admin name if you have it
+  role: req.user.role,
+      action: "PRODUCT_BULK_UPLOAD",
+      meta: {
+        count: saved.length,
+      },
+      ip,
+      timestamp: new Date(),
+    });
+
+
     res.status(201).json({
       success: true,
       message: `Uploaded ${saved.length} products`,
@@ -158,6 +179,7 @@ router.post("/upload/bulk", upload.array("images", 20), async (req, res) => {
 // ==================================================
 router.post(
   "/upload",
+  accessAuth,
   upload.fields([
     { name: "images", maxCount: 10 },
     { name: "customerPhotos", maxCount: 10 },
@@ -240,7 +262,27 @@ router.post(
           { new: true }
         );
 
+        // 🔥 ACTIVITY LOG: PRODUCT UPDATE
+const ip =
+  req.headers["x-forwarded-for"]?.split(",")[0] ||
+  req.socket.remoteAddress;
+
+await Activity.create({
+userId: req.user.id,           // 🔥 REQUIRED
+userName: req.user.email,     // or req.user.name if you want
+role: req.user.role,  
+  action: "PRODUCT_EDIT_UPLOAD",
+  meta: {
+    productId: product._id,
+    name: product.name,
+  },
+  ip,
+  timestamp: new Date(),
+});
+
+
         return res.json({ success: true, product });
+
       }
 
       // ➕ CREATE
@@ -271,6 +313,24 @@ router.post(
       });
 
       await product.save();
+      // 🔥 ACTIVITY LOG: PRODUCT CREATE
+      const ip =
+        req.headers["x-forwarded-for"]?.split(",")[0] ||
+        req.socket.remoteAddress;
+
+      await Activity.create({
+      userId: req.user.id,
+        userName: req.user.email,  
+        role: req.user.role,  
+        action: "PRODUCT_CREATE",
+        meta: {
+          productId: product._id,
+          name: product.name,
+          category: product.category,
+        },
+        ip,
+        timestamp: new Date(),
+      });
 
       res.status(201).json({ success: true, product });
     } catch (err) {
@@ -294,8 +354,29 @@ router.get("/:id", async (req, res) => {
   res.json({ success: true, product });
 });
 
-router.delete("/:id", async (req, res) => {
-  await Product.findByIdAndDelete(req.params.id);
+router.delete("/:id", accessAuth, async (req, res) => {
+  const product = await Product.findByIdAndDelete(req.params.id);
+
+  if (product) {
+    const ip =
+      req.headers["x-forwarded-for"]?.split(",")[0] ||
+      req.socket.remoteAddress;
+
+    await Activity.create({
+           userId: req.user.id, 
+    userName: req.user.email,            // or admin name if you have it
+  role: req.user.role,
+      action: "PRODUCT_DELETED",
+      meta: {
+        productId: product._id,
+        name: product.name,
+        category: product.category,
+      },
+      ip,
+      timestamp: new Date(),
+    });
+  }
+
   res.json({ success: true });
 });
 

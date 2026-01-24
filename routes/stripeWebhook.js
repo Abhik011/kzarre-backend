@@ -5,7 +5,9 @@ const Order = require("../models/Order");
 const CourierPartner = require("../models/CourierPartner.model"); // ✅ make sure path is correct
 const createShipment = require("../services/createShipment");
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const stripe = process.env.STRIPE_SECRET_KEY
+  ? new Stripe(process.env.STRIPE_SECRET_KEY)
+  : null;
 
 /* =====================================================
    🔔 STRIPE WEBHOOK
@@ -15,6 +17,11 @@ router.post(
   express.raw({ type: "application/json" }),
   async (req, res) => {
     console.log("✅ STRIPE WEBHOOK HIT");
+
+    if (!stripe) {
+      console.error("❌ Stripe not configured");
+      return res.status(500).json({ error: "Stripe not configured" });
+    }
 
     const sig = req.headers["stripe-signature"];
     let event;

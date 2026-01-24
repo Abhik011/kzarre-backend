@@ -115,10 +115,11 @@ router.post("/send",  async (req, res) => {
 });
 
 // ADMIN – list subscribers
-router.get("/subscribers",  async (req, res) => {
+router.get("/subscribers", async (req, res) => {
   const subscribers = await Subscriber.find().sort({ createdAt: -1 });
-  res.json(subscribers);
+  res.json({ subscribers });
 });
+
 
 // PUBLIC – subscribe
 router.post("/subscribe", async (req, res) => {

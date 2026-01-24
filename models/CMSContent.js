@@ -43,6 +43,13 @@ const CMSContentSchema = new mongoose.Schema(
       alignment: { type: String, default: "left" },
     },
 
+   // ✅ ABOUT PAGE STRUCTURED DATA
+aboutData: {
+  type: Object,
+  default: null,
+},
+
+
     media: {
       url: String,
       name: String,

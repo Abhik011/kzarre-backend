@@ -19,27 +19,78 @@ function adminAuth(req, res, next) {
 // ==================================================
 // ⭐ 6. TOP ORDERS (FOR DASHBOARD)
 // ==================================================
+router.get("/search", async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q || q.trim().length < 2) {
+      return res.status(400).json({
+        success: false,
+        message: "Search query must be at least 2 characters"
+      });
+    }
+
+    const searchRegex = new RegExp(q.trim(), 'i');
+
+    // Search by orderId, customer email, or customer name
+    const orders = await Order.find({
+      $or: [
+        { orderId: searchRegex },
+        { email: searchRegex },
+        { customerName: searchRegex }
+      ]
+    })
+    .sort({ createdAt: -1 })
+    .limit(10)
+    .select("orderId amount status createdAt customerName email items");
+
+    return res.status(200).json({
+      success: true,
+      orders: orders.map(order => ({
+        _id: order._id,
+        orderId: order.orderId,
+        customer: order.customerName || order.email,
+        email: order.email,
+        amount: order.amount,
+        status: order.status,
+        createdAt: order.createdAt,
+        items: order.items?.length || 0
+      }))
+    });
+  } catch (err) {
+    console.error("ORDER SEARCH ERROR:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to search orders",
+    });
+  }
+});
+
+
 router.get("/top", async (req, res) => {
   try {
     const limit = Number(req.query.limit) || 5;
 
-    const orders = await Order.find()
-      .sort({ createdAt: -1 })     // latest orders
+    const dbOrders = await Order.find()
+      .sort({ createdAt: -1 })
       .limit(limit)
-      .select("orderId amount status createdAt customerName email");
+      .select("orderId amount status createdAt email address customerName");
 
-    const formatted = orders.map((o) => ({
-      _id: o.orderId,
-      customer: o.address?.name || o.userId?.name || o.email || "",
-
-      amount: o.amount,
-      status: o.status,
+    const orders = dbOrders.map(o => ({
+      _id: o._id.toString(),
+      orderId: o.orderId || o._id.toString(),
+      customer:
+        o.address?.name ||
+        o.customerName ||
+        o.email ||
+        "Unknown Customer",
+      amount: Number(o.amount) || 0,
+      status: o.status || "pending",
       createdAt: o.createdAt,
     }));
 
-    return res.status(200).json({
+    return res.json({
       success: true,
-      orders: formatted,
+      orders,
     });
   } catch (err) {
     console.error("TOP ORDERS ERROR:", err);
@@ -49,6 +100,126 @@ router.get("/top", async (req, res) => {
     });
   }
 });
+
+// router.get("/:id", async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const order = await Order.findById(id).select("-__v");
+
+//     if (!order) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Order not found"
+//       });
+//     }
+
+//     return res.status(200).json({
+//       success: true,
+//       order: {
+//         _id: order._id,
+//         orderId: order.orderId,
+//         customer: order.customerName || order.userId?.name || order.email || "",
+//         email: order.email,
+//         phone: order.phone,
+//         amount: order.amount,
+//         status: order.status,
+//         paymentStatus: order.paymentStatus,
+//         createdAt: order.createdAt,
+//         items: order.items || [],
+//         shippingAddress: order.shippingAddress
+//       }
+//     });
+//   } catch (err) {
+//     console.error("GET ORDER ERROR:", err);
+//     return res.status(500).json({
+//       success: false,
+//       message: "Failed to fetch order",
+//     });
+//   }
+// });
+
+router.get("/by-id/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const order = await Order.findById(id).select("-__v");
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found"
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      order: {
+        _id: order._id,
+        orderId: order.orderId,
+        customer: order.customerName || order.userId?.name || order.email || "",
+        email: order.email,
+        phone: order.phone,
+        amount: order.amount,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        paymentMethod: order.paymentMethod,
+        createdAt: order.createdAt,
+        items: order.items || [],
+        shippingAddress: order.shippingAddress
+      }
+    });
+  } catch (err) {
+    console.error("GET ORDER BY ID ERROR:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch order by id",
+    });
+  }
+});
+
+router.put("/:id/status", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        message: "Status is required"
+      });
+    }
+
+    const order = await Order.findByIdAndUpdate(
+      id,
+      { status },
+      { new: true }
+    );
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found"
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      order: {
+        _id: order._id,
+        status: order.status
+      }
+    });
+  } catch (err) {
+    console.error("UPDATE ORDER STATUS ERROR:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update order status",
+    });
+  }
+});
+
+
+
 
 // ==================================================
 // 1. COD ORDER

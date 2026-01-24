@@ -3,12 +3,16 @@ const router = express.Router();
 const slugify = require("slugify");
 const Story = require("../models/Story");
 const uploadStoryImage = require("../utils/uploadStoryImage");
+const Activity = require("../models/Activity");
+const accessAuth = require("../middlewares/accessAuth");
+
 
 /* ================= ADMIN ================= */
 
 // CREATE
 router.post(
   "/create",
+  accessAuth,
   uploadStoryImage.fields([
     { name: "coverImage", maxCount: 1 },
     { name: "images", maxCount: 5 },
@@ -31,6 +35,24 @@ router.post(
       slug: slugify(title, { lower: true, strict: true }),
       published: published !== "false",
     });
+const ip =
+        req.headers["x-forwarded-for"]?.split(",")[0] ||
+        req.socket.remoteAddress;
+
+      await Activity.create({
+        userId: req.user.id,
+        userName: req.user.email,
+        role: req.user.role,
+
+        action: "STORY_CREATE",
+        meta: {
+          storyId: story._id,
+          title: story.title,
+          published: story.published,
+        },
+        ip,
+        timestamp: new Date(),
+      });
 
     res.status(201).json({ success: true, story });
   }
@@ -45,6 +67,7 @@ router.get("/", async (_, res) => {
 // UPDATE ✅
 router.put(
   "/:id",
+  accessAuth,
   uploadStoryImage.fields([
     { name: "coverImage", maxCount: 1 },
     { name: "images", maxCount: 5 },
@@ -71,14 +94,63 @@ router.put(
 
     if (!story) return res.status(404).json({ message: "Story not found" });
 
+    const ip =
+        req.headers["x-forwarded-for"]?.split(",")[0] ||
+        req.socket.remoteAddress;
+
+      await Activity.create({
+        userId: req.user.id,
+        userName: req.user.email,
+        role: req.user.role,
+
+        action: "STORY_UPDATE",
+        meta: {
+          storyId: story._id,
+          title: story.title,
+          published: story.published,
+        },
+        ip,
+        timestamp: new Date(),
+      });
+
     res.json({ success: true, story });
   }
 );
 
 // DELETE
-router.delete("/:id", async (req, res) => {
-  await Story.findByIdAndDelete(req.params.id);
-  res.json({ success: true });
+router.delete("/:id", accessAuth, async (req, res) => {
+  try {
+    const story = await Story.findByIdAndDelete(req.params.id);
+
+    if (!story) {
+      return res.status(404).json({ message: "Story not found" });
+    }
+
+    // 🔥 ACTIVITY LOG: STORY DELETE
+    const ip =
+      req.headers["x-forwarded-for"]?.split(",")[0] ||
+      req.socket.remoteAddress;
+
+    await Activity.create({
+      userId: req.user.id,
+      userName: req.user.email,
+      role: req.user.role,
+
+      action: "STORY_DELETED",
+      meta: {
+        storyId: story._id,
+        title: story.title,
+      },
+      ip,
+      timestamp: new Date(),
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Story delete error:", err);
+    res.status(500).json({ message: err.message });
+  }
 });
+
 
 module.exports = router;

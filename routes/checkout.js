@@ -3,13 +3,16 @@ const router = express.Router();
 const mongoose = require("mongoose");
 const Stripe = require("stripe");
 
+const Cart = require("../models/Cart");
 const Order = require("../models/Order");
 const Product = require("../models/product");
 const User = require("../models/Customer"); // ✅ for email
 const { sendEmail } = require("../utils/sendEmail");
 const { sendNotification } = require("../utils/notify");
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const { auth } = require("../middlewares/auth");
+const stripe = process.env.STRIPE_SECRET_KEY
+  ? new Stripe(process.env.STRIPE_SECRET_KEY)
+  : null;
 
 /* ==================================================
    HELPERS
@@ -50,85 +53,41 @@ router.get("/order/:orderId", async (req, res) => {
 /* ==================================================
    CREATE ORDER (STRIPE) — NO CONFIRM HERE
 ================================================== */
-router.post("/create-order", async (req, res) => {
+router.post("/create-order", auth(), async (req, res) => {
   try {
-    const { userId, productId, qty, size, color, address } = req.body;
+    const { productId, qty, size, color, address } = req.body;
 
-    if (!productId || !qty || !address?.name || !address?.phone) {
+    if (!address?.name || !address?.phone) {
       return res.status(400).json({
         success: false,
-        message: "Missing required fields",
+        message: "Address is required",
       });
     }
 
-    const product = await Product.findById(productId);
-    if (!product) {
-      return res.status(404).json({ success: false, message: "Product not found" });
-    }
+    const userId = req.user?._id || null;
+    let items = [];
+    let subtotal = 0;
 
-    /* =========================
-       STOCK CHECK (NO DEDUCT)
-    ========================= */
-    let variant = null;
-
-    if (product.variants?.length) {
-      variant = product.variants.find(
-        v => v.size === size && (!color || v.color === color)
-      );
-
-      if (!variant || variant.stock < qty) {
-        return res.status(400).json({
-          success: false,
-          message: "Variant out of stock",
-        });
+    /* =====================================================
+       BUY NOW FLOW
+    ===================================================== */
+    if (productId && qty) {
+      const product = await Product.findById(productId);
+      if (!product) {
+        return res.status(404).json({ success: false, message: "Product not found" });
       }
-    } else {
+
       if (product.stockQuantity < qty) {
         return res.status(400).json({
           success: false,
           message: "Out of stock",
         });
       }
-    }
 
-    /* =========================
-       USER EMAIL
-    ========================= */
-    let userEmail = address.email || null;
-    if (userId) {
-      const user = await User.findById(userId).select("email");
-      if (user?.email) userEmail = user.email;
-    }
+      subtotal = product.price * qty;
 
-    /* =========================
-       PRICING
-    ========================= */
-    const subtotal = product.price * qty;
-    const deliveryFee = 15;
-    const totalAmount = subtotal + deliveryFee;
-
-    /* =========================
-       EASYSHIP-COMPATIBLE ADDRESS
-    ========================= */
-    const normalizedAddress = {
-      name: address.name,
-      phone: address.phone,
-      line1: address.line1 || address.address || "",
-      city: address.city,
-      state: address.state || "",
-     pincode: address.pincode,
-      country_alpha2: address.countryCode || "IN",
-    };
-
-    /* =========================
-       CREATE ORDER
-    ========================= */
-    const order = await Order.create({
-      userId: userId ? new mongoose.Types.ObjectId(userId) : null,
-      email: userEmail,
-
-      items: [{
-        product: productId,
+      items.push({
+        product: product._id,
         qty,
         price: product.price,
         name: product.name,
@@ -136,29 +95,81 @@ router.post("/create-order", async (req, res) => {
         size: size || "",
         color: color || "",
         sku: product.sku || "N/A",
-        barcode: variant?.barcode || product.sku || "N/A",
-      }],
+      });
+    }
 
-      address: normalizedAddress,
-      amount: totalAmount,
+    /* =====================================================
+       CART FLOW
+    ===================================================== */
+    else {
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          message: "Login required for cart checkout",
+        });
+      }
+
+      const cartDoc = await Cart.findOne({ userId });
+      const cart = cartDoc?.items || [];
+
+      if (!cart.length) {
+        return res.status(400).json({
+          success: false,
+          message: "Cart is empty",
+        });
+      }
+
+      for (const c of cart) {
+        const product = await Product.findById(c.productId);
+        if (!product) continue;
+
+        if (product.stockQuantity < c.quantity) {
+          return res.status(400).json({
+            success: false,
+            message: `${product.name} out of stock`,
+          });
+        }
+
+        subtotal += product.price * c.quantity;
+
+        items.push({
+          product: product._id,
+          qty: c.quantity,
+          price: product.price,
+          name: product.name,
+          image: product.imageUrl,
+          size: c.size || "",
+          color: c.color || "",
+          sku: product.sku || "N/A",
+        });
+      }
+    }
+
+    /* =====================================================
+       CREATE ORDER
+    ===================================================== */
+    const order = await Order.create({
+      userId,
+      items,
+      subtotal,
+      deliveryFee: 15,
+      amount: subtotal + 15,
+      address,
       orderId: generateOrderId(),
-
-      paymentMethod: "STRIPE",
-      paymentId: null,
-
       status: "pending_payment",
-      requiresShipment: true,   // 🔥 IMPORTANT
-      stockReduced: false,      // reduce AFTER payment
-
+      paymentMethod: "STRIPE",
+      requiresShipment: true,
+      stockReduced: false,
       createdAt: new Date(),
     });
 
-    res.json({ success: true, orderId: order.orderId, order });
+    res.json({ success: true, orderId: order.orderId });
   } catch (err) {
     console.error("CREATE ORDER ERROR:", err);
     res.status(500).json({ success: false, message: "Server error" });
   }
 });
+
 
 
 /* ==================================================
@@ -330,6 +341,105 @@ router.post("/refund", async (req, res) => {
     res.status(500).json({ success: false, message: "Refund failed" });
   }
 });
+
+router.post("/create", auth(), async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    /* =========================
+       1️⃣ CHECK EXISTING DRAFT
+    ========================= */
+    const existingOrder = await Order.findOne({
+      userId,
+      status: "pending_payment",
+    });
+
+    if (existingOrder) {
+      return res.json({
+        success: true,
+        orderId: existingOrder.orderId,
+        reused: true,
+      });
+    }
+
+    /* =========================
+       2️⃣ LOAD CART
+    ========================= */
+    const cartDoc = await Cart.findOne({ userId });
+    const cart = cartDoc?.items || [];
+
+    if (!cart.length) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Cart is empty" });
+    }
+
+    /* =========================
+       3️⃣ BUILD ORDER ITEMS
+    ========================= */
+    let subtotal = 0;
+    const items = [];
+
+    for (const c of cart) {
+      const product = await Product.findById(c.productId);
+      if (!product) {
+        return res.status(404).json({ success: false });
+      }
+
+      if (product.stockQuantity < c.quantity) {
+        return res.status(400).json({
+          success: false,
+          message: `${product.name} out of stock`,
+        });
+      }
+
+      subtotal += product.price * c.quantity;
+
+      items.push({
+        product: product._id,
+        qty: c.quantity,
+        price: product.price,
+        name: product.name,
+        image: product.imageUrl,
+        size: c.size || "",
+        sku: product.sku || "N/A",
+      });
+    }
+
+    /* =========================
+       4️⃣ CREATE DRAFT ORDER
+    ========================= */
+    const order = await Order.create({
+      userId,
+      items,
+      subtotal,
+      deliveryFee: 15,
+      amount: subtotal + 15,
+
+      address: null,                // 🔥 later
+      orderId: generateOrderId(),
+
+      status: "pending_payment",     // 🔥 draft
+      paymentMethod: "PENDING",
+
+      requiresShipment: true,
+      stockReduced: false,
+      createdAt: new Date(),
+    });
+
+    /* =========================
+       5️⃣ RESPONSE
+    ========================= */
+    res.json({
+      success: true,
+      orderId: order.orderId,
+    });
+  } catch (err) {
+    console.error("CREATE ORDER ERROR:", err);
+    res.status(500).json({ success: false });
+  }
+});
+
 
 module.exports = router;
 

@@ -12,6 +12,8 @@ const Product = require("../models/product");
 const { sendNotification } = require("../utils/notify");
 const compressVideo = require("../utils/compressVideo");
 const compressImage = require("../utils/compressImage");
+const Activity = require("../models/Activity");
+const accessAuth = require("../middlewares/accessAuth");
 
 
 
@@ -46,7 +48,7 @@ const os = require("os");
 
 const uploadToS3 = async (file, displayTo = "") => {
 
-try {
+  try {
     let folder = "cms/others";
     if (displayTo.includes("video")) folder = "cms/videos";
     else if (displayTo.includes("grid") || displayTo.includes("banner"))
@@ -58,10 +60,10 @@ try {
     let buffer = file.buffer;
     let contentType = file.mimetype;
 
-if (file.mimetype.startsWith("image/")) {
-  buffer = await compressImage(file.buffer, file.mimetype);
-  contentType = "image/webp";
-}
+    if (file.mimetype.startsWith("image/")) {
+      buffer = await compressImage(file.buffer, file.mimetype);
+      contentType = "image/webp";
+    }
 
     if (file.mimetype.startsWith("video/")) {
       const tempDir = os.tmpdir();
@@ -70,9 +72,9 @@ if (file.mimetype.startsWith("image/")) {
         `${Date.now()}-${file.originalname}`
       );
       const outputPath = path.join(
-  tempDir,
-  `${Date.now()}-compressed.mp4`
-);
+        tempDir,
+        `${Date.now()}-compressed.mp4`
+      );
 
 
       fs.writeFileSync(inputPath, file.buffer);
@@ -113,7 +115,7 @@ if (file.mimetype.startsWith("image/")) {
 };
 
 
-router.post("/save", upload.any(), async (req, res) => {
+router.post("/save", accessAuth,  upload.any(), async (req, res) => {
   try {
     const {
       title,
@@ -128,15 +130,12 @@ router.post("/save", upload.any(), async (req, res) => {
       descriptions,
       metaTags,
       metaDescriptions,
-      keywords: perImageKeywords,
+      imageKeywords, // ✅ ADD THIS
     } = req.body;
+
 
     const displayToValue = displayTo || "";
 
-    // -----------------------------
-    // FIX KEYWORDS (meta.keywords)
-    // Always convert to string
-    // -----------------------------
     let cleanKeywords = keywords;
     try {
       const parsed = JSON.parse(keywords);
@@ -213,24 +212,39 @@ router.post("/save", upload.any(), async (req, res) => {
 
     // ============================================
     // 3️⃣ Women / Men 4-Grid (EXACT 4 images)
-    // ============================================
     else if (["women-4grid", "men-4grid"].includes(displayToValue)) {
       if (!imageFiles || imageFiles.length !== 4)
         return res.status(400).json({ error: "Requires EXACTLY 4 images" });
 
+      const arrTitles = JSON.parse(req.body.titles || "[]");
+      const arrDescriptions = JSON.parse(req.body.descriptions || "[]");
+      const arrMetaTags = JSON.parse(req.body.metaTags || "[]");
+      const arrMetaDescriptions = JSON.parse(req.body.metaDescriptions || "[]");
+
+      let arrKeywords = [];
+      try {
+        const parsed = JSON.parse(req.body.imageKeywords || "[]");
+        arrKeywords = Array.isArray(parsed) ? parsed : [];
+      } catch {
+        arrKeywords = [];
+      }
+
       mediaGroup = await Promise.all(
         imageFiles.map(async (file, i) => ({
           imageUrl: await uploadToS3(file, displayToValue),
-          title: `Grid Item ${i + 1}`, // ⭐ AUTO TITLE
-          description: `Description ${i + 1}`, // ⭐ AUTO DESCRIPTION
-          metaTag: "",
-          metaDescription: "",
-          keywords: "",
+          title: arrTitles[i] || `Grid Item ${i + 1}`,
+          description: arrDescriptions[i] || `Description ${i + 1}`,
+          metaTag: arrMetaTags[i] || "",
+          metaDescription: arrMetaDescriptions[i] || "",
+          keywords: Array.isArray(arrKeywords[i])
+            ? arrKeywords[i].join(",")
+            : arrKeywords[i] || "",
           order: i + 1,
           style: parsedBannerStyle
         }))
       );
     }
+
 
     // ============================================
     // 4️⃣ Women / Men 5-Grid (EXACT 5 images + metadata)
@@ -245,13 +259,14 @@ router.post("/save", upload.any(), async (req, res) => {
       const arrMetaDescriptions = JSON.parse(req.body.metaDescriptions || "[]");
 
       // keywords safe parse
-      let arrKeywords = [];
-      try {
-        const parsed = JSON.parse(req.body.keywords || "[]");
-        arrKeywords = Array.isArray(parsed) ? parsed : [];
-      } catch {
-        arrKeywords = [];
-      }
+let arrKeywords = [];
+try {
+  const parsed = JSON.parse(req.body.imageKeywords || "[]");
+  arrKeywords = Array.isArray(parsed) ? parsed : [];
+} catch {
+  arrKeywords = [];
+}
+
 
       mediaGroup = await Promise.all(
         imageFiles.map(async (file, i) => ({
@@ -297,10 +312,63 @@ router.post("/save", upload.any(), async (req, res) => {
         .toJSDate();
     }
 
+    let aboutData = null;
+
+    // ============================================
+    // 🟣 ABOUT PAGE MEDIA HANDLING
+    // ============================================
+    if (displayToValue === "about-page") {
+      let parsedAbout = null;
+
+      try {
+        parsedAbout = req.body.aboutData
+          ? JSON.parse(req.body.aboutData)
+          : null;
+      } catch {
+        return res.status(400).json({ error: "Invalid aboutData JSON" });
+      }
+
+      // ---------- HERO VIDEO ----------
+      if (videoFile) {
+        heroVideoUrl = await uploadToS3(videoFile, "about-page");
+      }
+
+      // ---------- GRID IMAGES ----------
+      let aboutGrid = [];
+
+      if (imageFiles && imageFiles.length > 0) {
+        aboutGrid = await Promise.all(
+          imageFiles.map(async (file, idx) => ({
+            text: parsedAbout?.grid?.[idx]?.text || "",
+            images: [
+              await uploadToS3(file, "about-page"),
+            ],
+          }))
+        );
+
+        console.log("FILES RECEIVED:", req.files?.map(f => f.mimetype));
+
+      }
+
+      aboutData = {
+        heroVideo: heroVideoUrl,
+        content: {
+          quote: parsedAbout?.content?.quote || { text: "", highlight: "" },
+          intro: parsedAbout?.content?.intro || "",
+          body: parsedAbout?.content?.body || "",
+        },
+        grid: aboutGrid,
+        footer: parsedAbout?.footer || { text: "", heading: "" },
+      };
+    }
+
+
+
     const saved = await CMSContent.create({
       title,
       description,
       displayTo: displayToValue,
+      aboutData,
       heroVideoUrl,
       media,
       mediaGroup,
@@ -319,7 +387,7 @@ router.post("/save", upload.any(), async (req, res) => {
         visibleTime,
       },
 
-      author: "Admin",
+       author: req.user.name, // ✅ AUTHOR TRACKING
 
       // ✅ AUTO STATUS
       status: visibleAt && visibleAt > new Date()
@@ -332,7 +400,7 @@ router.post("/save", upload.any(), async (req, res) => {
       sendNotification({
         type: "cms-scheduled",
         title: "Content Scheduled",
-        message: `CMS content "${saved.title}" scheduled for ${visibleDate} ${visibleTime} (New Jersey time)`,
+        message: `CMS content "${saved.title}" scheduled for ${visibleDate} ${visibleTime}`,
         cmsId: saved._id,
         displayTo: saved.displayTo,
         visibleAt: saved.visibleAt,
@@ -347,6 +415,27 @@ router.post("/save", upload.any(), async (req, res) => {
       });
     }
     res.json({ success: true, message: "Saved (Pending Review)", saved });
+    // 🔥 ACTIVITY LOG: CMS CREATE
+const ip =
+  req.headers["x-forwarded-for"]?.split(",")[0] ||
+  req.socket.remoteAddress;
+
+await Activity.create({
+ userId: req.user.id,           // 🔥 REQUIRED
+userName: req.user.email,     // or req.user.name if you want
+role: req.user.role,          // 🔥 REQUIRED BY SCHEMA
+
+  action: "CMS_CREATE",
+  meta: {
+    cmsId: saved._id,
+    title: saved.title,
+    displayTo: saved.displayTo,
+    status: saved.status,
+  },
+  ip,
+  timestamp: new Date(),
+});
+
   } catch (err) {
     console.error("❌ Error:", err);
     res.status(500).json({ error: err.message });
@@ -554,6 +643,30 @@ router.get("/public", async (req, res) => {
   }
 });
 
+// =============================
+// ✅ PUBLIC ABOUT PAGE
+// =============================
+router.get("/public/about", async (req, res) => {
+  try {
+    const now = new Date();
+
+    const about = await CMSContent.findOne({
+      displayTo: "about-page",
+      $or: [
+        { status: "Approved" },
+        { status: "Scheduled", visibleAt: { $lte: now } }
+      ]
+    }).sort({ createdAt: -1 });
+
+    if (!about || !about.aboutData) {
+      return res.json({ about: null });
+    }
+
+    res.json({ about: about.aboutData });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to load About page" });
+  }
+});
 
 router.get("/fonts", async (req, res) => {
   try {
@@ -564,7 +677,7 @@ router.get("/fonts", async (req, res) => {
   }
 });
 
-router.post("/upload-font", upload.single("font"), async (req, res) => {
+router.post("/upload-font",   accessAuth,  upload.single("font"), async (req, res) => {
   try {
     const file = req.file;
 
@@ -588,13 +701,33 @@ router.post("/upload-font", upload.single("font"), async (req, res) => {
       fontStyle,
     });
 
+    // 🔥 ACTIVITY LOG: FONT UPLOAD
+const ip =
+  req.headers["x-forwarded-for"]?.split(",")[0] ||
+  req.socket.remoteAddress;
+
+await Activity.create({
+ userId: req.user.id,           // 🔥 REQUIRED
+userName: req.user.email,     // or req.user.name if you want
+role: req.user.role,          // 🔥 REQUIRED BY SCHEMA
+
+  action: "FONT_UPLOADED",
+  meta: {
+    fontId: saved._id,
+    fontName: saved.fontName,
+  },
+  ip,
+  timestamp: new Date(),
+});
+
+
     res.json({ success: true, font: saved });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.patch("/approve/:id", async (req, res) => {
+router.patch("/approve/:id",   accessAuth,  async (req, res) => {
   try {
     const post = await CMSContent.findByIdAndUpdate(
       req.params.id,
@@ -602,6 +735,26 @@ router.patch("/approve/:id", async (req, res) => {
       { new: true }
     );
     if (!post) return res.status(404).json({ message: "Post not found" });
+
+    // 🔥 ACTIVITY LOG: CMS APPROVE
+const ip =
+  req.headers["x-forwarded-for"]?.split(",")[0] ||
+  req.socket.remoteAddress;
+
+await Activity.create({
+ userId: req.user.id,           // 🔥 REQUIRED
+userName: req.user.email,     // or req.user.name if you want
+role: req.user.role,          // 🔥 REQUIRED BY SCHEMA
+
+  action: "CMS_APPROVED",
+  meta: {
+    cmsId: post._id,
+    title: post.title,
+  },
+  ip,
+  timestamp: new Date(),
+});
+
     console.log("✅ Post Approved:", post._id);
     res.json({ success: true, post });
   } catch (err) {
@@ -609,7 +762,7 @@ router.patch("/approve/:id", async (req, res) => {
   }
 });
 
-router.patch("/reject/:id", async (req, res) => {
+router.patch("/reject/:id",   accessAuth,  async (req, res) => {
   try {
     const { reason } = req.body;
     const post = await CMSContent.findByIdAndUpdate(
@@ -622,6 +775,27 @@ router.patch("/reject/:id", async (req, res) => {
       { new: true }
     );
     if (!post) return res.status(404).json({ message: "Post not found" });
+
+    // 🔥 ACTIVITY LOG: CMS REJECT
+const ip =
+  req.headers["x-forwarded-for"]?.split(",")[0] ||
+  req.socket.remoteAddress;
+
+await Activity.create({
+ userId: req.user.id,           // 🔥 REQUIRED
+userName: req.user.email,     // or req.user.name if you want
+role: req.user.role,          // 🔥 REQUIRED BY SCHEMA
+
+  action: "CMS_REJECTED",
+  meta: {
+    cmsId: post._id,
+    title: post.title,
+    reason: post.rejectionReason,
+  },
+  ip,
+  timestamp: new Date(),
+});
+
     console.log("❌ Post Rejected:", post._id);
     res.json({ success: true, post });
   } catch (err) {
@@ -644,7 +818,7 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-router.put("/update/:id", upload.any(), async (req, res) => {
+router.put("/update/:id", accessAuth, upload.any(), async (req, res) => {
   try {
     const existing = await CMSContent.findById(req.params.id);
     if (!existing) return res.status(404).json({ error: "Content not found" });
@@ -785,11 +959,11 @@ router.put("/update/:id", upload.any(), async (req, res) => {
     }
 
     // 🔔 CMS SCHEDULING NOTIFICATION
-    
+
 
 
     await existing.save();
-if (prevStatus !== "Scheduled" && existing.status === "Scheduled") {
+    if (prevStatus !== "Scheduled" && existing.status === "Scheduled") {
       sendNotification({
         type: "cms-scheduled",
         title: "Content Scheduled",
@@ -799,6 +973,23 @@ if (prevStatus !== "Scheduled" && existing.status === "Scheduled") {
         visibleAt: existing.visibleAt,
       });
     }
+    await Activity.create({
+ userId: req.user.id,           // 🔥 REQUIRED
+userName: req.user.email,     // or req.user.name if you want
+role: req.user.role,          // 🔥 REQUIRED BY SCHEMA
+
+  action: "CMS_SCHEDULED",
+  meta: {
+    cmsId: existing._id,
+    title: existing.title,
+    visibleAt: existing.visibleAt,
+  },
+  ip:
+    req.headers["x-forwarded-for"]?.split(",")[0] ||
+    req.socket.remoteAddress,
+  timestamp: new Date(),
+});
+
 
     if (prevStatus === "Scheduled" && existing.status !== "Scheduled") {
       sendNotification({
@@ -808,6 +999,23 @@ if (prevStatus !== "Scheduled" && existing.status === "Scheduled") {
         cmsId: existing._id,
       });
     }
+
+    await Activity.create({
+  userId: req.user.id,           // 🔥 REQUIRED
+userName: req.user.email,     // or req.user.name if you want
+role: req.user.role,          // 🔥 REQUIRED BY SCHEMA
+
+  action: "CMS_UNSCHEDULED",
+  meta: {
+    cmsId: existing._id,
+    title: existing.title,
+  },
+  ip:
+    req.headers["x-forwarded-for"]?.split(",")[0] ||
+    req.socket.remoteAddress,
+  timestamp: new Date(),
+});
+
     res.json({ success: true, updated: existing });
   } catch (err) {
     console.error("UPDATE CMS ERROR:", err);
@@ -815,13 +1023,32 @@ if (prevStatus !== "Scheduled" && existing.status === "Scheduled") {
   }
 });
 
-router.delete("/delete/:id", async (req, res) => {
+router.delete("/delete/:id",  accessAuth,  async (req, res) => {
   try {
     const deleted = await CMSContent.findByIdAndDelete(req.params.id);
 
     if (!deleted) {
       return res.status(404).json({ error: "Content not found" });
     }
+
+    // 🔥 ACTIVITY LOG: CMS DELETE
+const ip =
+  req.headers["x-forwarded-for"]?.split(",")[0] ||
+  req.socket.remoteAddress;
+
+await Activity.create({
+  userId: req.user.id,           // 🔥 REQUIRED
+userName: req.user.email,     // or req.user.name if you want
+role: req.user.role,          // 🔥 REQUIRED BY SCHEMA
+  action: "CMS_DELETED",
+  meta: {
+    cmsId: deleted._id,
+    title: deleted.title,
+    displayTo: deleted.displayTo,
+  },
+  ip,
+  timestamp: new Date(),
+});
 
     res.json({ success: true, message: "Deleted successfully" });
   } catch (err) {

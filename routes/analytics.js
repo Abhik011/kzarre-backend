@@ -138,8 +138,8 @@ router.get('/summary', async (req, res) => {
       summary: {
         totalRevenue: revenueAgg[0]?.totalRevenue || 0,
         totalOrders: revenueAgg[0]?.totalOrders || 0,
-        totalUsers,
-        newUsers
+        totalUsers: totalUsers || 0,
+        newUsers: newUsers || 0
       }
     });
   } catch (err) {
@@ -540,10 +540,11 @@ router.get("/users/type", async (req, res) => {
 
     res.json({
       success: true,
-      newUsers,
-      returningUsers: totalUsers - newUsers
+      newUsers: newUsers || 0,
+      returningUsers: Math.max(0, (totalUsers || 0) - (newUsers || 0))
     });
   } catch (err) {
+    console.error('User type error:', err);
     res.status(500).json({ success: false, message: "User type failed" });
   }
 });

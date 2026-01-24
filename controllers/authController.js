@@ -107,60 +107,74 @@ exports.verifyOtp = async (req, res, next) => {
 // ===== LOGIN (WITH COOKIE) =====
 exports.login = async (req, res, next) => {
   try {
-    console.log("✅ LOGIN ROUTE HIT");
-
     const { error, value } = loginSchema.validate(req.body);
     if (error) {
-      console.log("❌ Validation Error:", error.details[0].message);
       return res.status(400).json({ message: error.details[0].message });
     }
 
     const user = await Customer.findOne({ email: value.email });
     if (!user) {
-      console.log("❌ User not found");
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
     const match = await user.comparePassword(value.password);
     if (!match) {
-      console.log("❌ Wrong password");
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
+    // 🔥 EMAIL NOT VERIFIED → FORCE OTP
     if (!user.isVerified) {
-      console.log("❌ Email not verified");
-      return res.status(403).json({ message: "Please verify your email before logging in." });
+      // Generate NEW OTP
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const hashedOtp = await bcrypt.hash(otp, 10);
+
+      user.otp = hashedOtp;
+      user.otpExpires = Date.now() + 5 * 60 * 1000; // 5 min
+      await user.save();
+
+      // Send OTP again
+      await sendEmail(
+        user.email,
+        "Verify your KZARRÈ account",
+        otpEmailTemplate(user.name, otp)
+      );
+
+      return res.status(403).json({
+        success: false,
+        code: "EMAIL_NOT_VERIFIED",
+        message: "Please verify your email before logging in",
+        email: user.email,
+      });
     }
 
+    // ✅ VERIFIED → LOGIN
     const token = generateToken(user);
-    console.log("✅ JWT GENERATED");
 
-    // ============================================
-    //  SET COOKIE (HTTP-ONLY, LOCALHOST SAFE)
-    // ============================================
     res.cookie("kzarre_token", token, {
-      httpOnly: true,     // JS cannot access
-      secure: false,      // http on localhost/IP
-      sameSite: "lax",    // works with Next.js
-      path: "/",          // important
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      httpOnly: true,
+      secure: false, // true in prod
+      sameSite: "lax",
+      path: "/",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
-    console.log("🍪 COOKIE SET: kzarre_token");
-    console.log("📦 HEADERS:", res.getHeaders());
-
-    // Send Response
     res.status(200).json({
+      success: true,
       message: "Login successful",
-      user: { id: user._id, name: user.name, email: user.email },
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+      },
       token,
     });
-
   } catch (err) {
-    console.error("🔥 LOGIN ERROR:", err);
+    console.error("LOGIN ERROR:", err);
     next(err);
   }
 };
+
+
 
 
 // ===== FORGOT PASSWORD =====

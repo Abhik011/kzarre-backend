@@ -18,7 +18,16 @@ if (cliPort) cliPort = cliPort.split("=")[1];
 // ----------------------------
 // DB CONNECT
 // ----------------------------
-connectDB();
+// ----------------------------
+// DB CONNECT
+// ----------------------------
+connectDB().then(() => {
+  console.log("✅ DB connected");
+
+  // 🔥 Start background cron jobs AFTER DB is ready
+  require("./cron/autoBreachPromises");
+});
+
 
 const http = require("http");
 const { Server } = require("socket.io");
@@ -204,6 +213,9 @@ app.use("/api/admin/orders", require("./routes/admin/orders") );
 app.use("/api/admin/media", require("./routes/admin/media"));
 app.use("/api/profile", require("./routes/profile.routes"));
 app.use("/api/admin/system", require("./routes/admin/system"));
+app.use("/api/security", require("./routes/security"));
+app.use("/api/admin", require("./routes/pages")); 
+
 
 // checking the new 
 
