@@ -229,6 +229,27 @@ router.post("/login", async (req, res) => {
 
     await admin.save();
 
+    // 🔥 ACTIVITY LOG: LOGIN (GLOBAL ACTIVITY COLLECTION)
+const ipAddr =
+  req.headers["x-forwarded-for"]?.split(",")[0] ||
+  req.socket.remoteAddress;
+
+await Activity.create({
+  userId: admin._id,
+  userName: admin.email,
+  role: roleName || "UNKNOWN",
+
+  action: "LOGIN",
+
+  meta: {
+    userAgent,
+  },
+
+  ip: ipAddr,
+  timestamp: new Date(),
+});
+
+
     /* ================================
        6️⃣ COOKIE
     ================================= */
@@ -304,7 +325,6 @@ await Activity.create({
   ip,
   timestamp: new Date(),
 });
-
 
       res.json({ message: "✅ Role deleted successfully" });
     } catch (err) {
