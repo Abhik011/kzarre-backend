@@ -8,9 +8,10 @@ const morgan = require("morgan");
 const cookieParser = require("cookie-parser");
 const connectDB = require("./config/db");
 const { errorHandler } = require("./middlewares/errorHandler");
-
+const http = require("http");
 const app = express();
-
+const { Server } = require("socket.io");
+const server = http.createServer(app);
 const args = process.argv.slice(2);
 let cliPort = args.find(a => a.startsWith("--port="));
 if (cliPort) cliPort = cliPort.split("=")[1];
@@ -18,21 +19,32 @@ if (cliPort) cliPort = cliPort.split("=")[1];
 // ----------------------------
 // DB CONNECT
 // ----------------------------
-// ----------------------------
-// DB CONNECT
-// ----------------------------
-connectDB().then(() => {
-  console.log("✅ DB connected");
+async function startServer() {
+  try {
+    await connectDB();   // 🔥 BLOCK until DB is ready
+    console.log("✅ DB connected");
 
-  // 🔥 Start background cron jobs AFTER DB is ready
-  require("./cron/autoBreachPromises");
-});
+    // Start cron only after DB is connected
+    require("./cron/autoBreachPromises");
+
+    const PORT = cliPort || process.env.PORT || 5500;
+    const HOST = "0.0.0.0";
+
+    server.listen(PORT, HOST, () => {
+      console.log(`\n✅ Server running on port ${PORT}`);
+      console.log("🔔 Socket.IO enabled");
+      console.log("🚀 Ready...\n");
+    });
+
+  } catch (err) {
+    console.error("❌ Failed to connect DB. Server not started.", err);
+    process.exit(1);  // 🔥 Kill process if DB not ready
+  }
+}
 
 
-const http = require("http");
-const { Server } = require("socket.io");
 
-const server = http.createServer(app);
+
 
 const io = new Server(server, {
   cors: {
@@ -40,6 +52,8 @@ const io = new Server(server, {
     credentials: true,
   },
 });
+
+startServer();
 
 global.io = io;
 
@@ -235,11 +249,11 @@ app.use(errorHandler);
 // ----------------------------
 // START SERVER
 // ----------------------------
-const PORT = cliPort || process.env.PORT || 5500;
-const HOST = "0.0.0.0";
-server.listen(PORT, HOST, () => {
-  console.log(`\n✅ Server running on port ${PORT}`);
-  console.log("🔔 Socket.IO enabled");
-  console.log("🚀 Ready...\n");
-});
+// const PORT = cliPort || process.env.PORT || 5500;
+// const HOST = "0.0.0.0";
+// server.listen(PORT, HOST, () => {
+//   console.log(`\n✅ Server running on port ${PORT}`);
+//   console.log("🔔 Socket.IO enabled");
+//   console.log("🚀 Ready...\n");
+// });
 
