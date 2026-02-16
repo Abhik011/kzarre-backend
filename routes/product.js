@@ -61,8 +61,15 @@ const storage = multer.memoryStorage();
 const upload = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: {
+    fileSize: 10 * 1024 * 1024,
+    fieldSize: 25 * 1024 * 1024, 
+    fields: 100,
+    files: 20
+  }
 });
+
+
 
 // ==================================================
 // SAFE JSON
@@ -215,8 +222,18 @@ router.post(
       const normalizedVariants = normalizeVariants(parsedVariants);
       const stockQuantity = calculateStockQuantity(normalizedVariants);
 
-      const oldGallery = safeJSON(existingGallery, []);
-      const oldCustomerPhotos = safeJSON(existingCustomerPhotos, []);
+   const oldGallery = Array.isArray(req.body["existingGallery[]"])
+  ? req.body["existingGallery[]"]
+  : req.body["existingGallery[]"]
+  ? [req.body["existingGallery[]"]]
+  : [];
+
+   const oldCustomerPhotos = Array.isArray(req.body["existingCustomerPhotos[]"])
+  ? req.body["existingCustomerPhotos[]"]
+  : req.body["existingCustomerPhotos[]"]
+  ? [req.body["existingCustomerPhotos[]"]]
+  : [];
+
 
       let newGallery = [];
       if (req.files?.images) {
