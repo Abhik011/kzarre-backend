@@ -115,7 +115,7 @@ const uploadToS3 = async (file, displayTo = "") => {
 };
 
 
-router.post("/save", accessAuth,  upload.any(), async (req, res) => {
+router.post("/save", accessAuth, upload.any(), async (req, res) => {
   try {
     const {
       title,
@@ -259,13 +259,13 @@ router.post("/save", accessAuth,  upload.any(), async (req, res) => {
       const arrMetaDescriptions = JSON.parse(req.body.metaDescriptions || "[]");
 
       // keywords safe parse
-let arrKeywords = [];
-try {
-  const parsed = JSON.parse(req.body.imageKeywords || "[]");
-  arrKeywords = Array.isArray(parsed) ? parsed : [];
-} catch {
-  arrKeywords = [];
-}
+      let arrKeywords = [];
+      try {
+        const parsed = JSON.parse(req.body.imageKeywords || "[]");
+        arrKeywords = Array.isArray(parsed) ? parsed : [];
+      } catch {
+        arrKeywords = [];
+      }
 
 
       mediaGroup = await Promise.all(
@@ -387,7 +387,7 @@ try {
         visibleTime,
       },
 
-       author: req.user.name, // ✅ AUTHOR TRACKING
+      author: req.user.name, // ✅ AUTHOR TRACKING
 
       // ✅ AUTO STATUS
       status: visibleAt && visibleAt > new Date()
@@ -416,25 +416,25 @@ try {
     }
     res.json({ success: true, message: "Saved (Pending Review)", saved });
     // 🔥 ACTIVITY LOG: CMS CREATE
-const ip =
-  req.headers["x-forwarded-for"]?.split(",")[0] ||
-  req.socket.remoteAddress;
+    const ip =
+      req.headers["x-forwarded-for"]?.split(",")[0] ||
+      req.socket.remoteAddress;
 
-await Activity.create({
- userId: req.user.id,           // 🔥 REQUIRED
-userName: req.user.email,     // or req.user.name if you want
-role: req.user.role,          // 🔥 REQUIRED BY SCHEMA
+    await Activity.create({
+      userId: req.user.id,           // 🔥 REQUIRED
+      userName: req.user.email,     // or req.user.name if you want
+      role: req.user.role,          // 🔥 REQUIRED BY SCHEMA
 
-  action: "CMS_CREATE",
-  meta: {
-    cmsId: saved._id,
-    title: saved.title,
-    displayTo: saved.displayTo,
-    status: saved.status,
-  },
-  ip,
-  timestamp: new Date(),
-});
+      action: "CMS_CREATE",
+      meta: {
+        cmsId: saved._id,
+        title: saved.title,
+        displayTo: saved.displayTo,
+        status: saved.status,
+      },
+      ip,
+      timestamp: new Date(),
+    });
 
   } catch (err) {
     console.error("❌ Error:", err);
@@ -677,7 +677,7 @@ router.get("/fonts", async (req, res) => {
   }
 });
 
-router.post("/upload-font",   accessAuth,  upload.single("font"), async (req, res) => {
+router.post("/upload-font", accessAuth, upload.single("font"), async (req, res) => {
   try {
     const file = req.file;
 
@@ -702,23 +702,23 @@ router.post("/upload-font",   accessAuth,  upload.single("font"), async (req, re
     });
 
     // 🔥 ACTIVITY LOG: FONT UPLOAD
-const ip =
-  req.headers["x-forwarded-for"]?.split(",")[0] ||
-  req.socket.remoteAddress;
+    const ip =
+      req.headers["x-forwarded-for"]?.split(",")[0] ||
+      req.socket.remoteAddress;
 
-await Activity.create({
- userId: req.user.id,           // 🔥 REQUIRED
-userName: req.user.email,     // or req.user.name if you want
-role: req.user.role,          // 🔥 REQUIRED BY SCHEMA
+    await Activity.create({
+      userId: req.user.id,           // 🔥 REQUIRED
+      userName: req.user.email,     // or req.user.name if you want
+      role: req.user.role,          // 🔥 REQUIRED BY SCHEMA
 
-  action: "FONT_UPLOADED",
-  meta: {
-    fontId: saved._id,
-    fontName: saved.fontName,
-  },
-  ip,
-  timestamp: new Date(),
-});
+      action: "FONT_UPLOADED",
+      meta: {
+        fontId: saved._id,
+        fontName: saved.fontName,
+      },
+      ip,
+      timestamp: new Date(),
+    });
 
 
     res.json({ success: true, font: saved });
@@ -727,7 +727,7 @@ role: req.user.role,          // 🔥 REQUIRED BY SCHEMA
   }
 });
 
-router.patch("/approve/:id",   accessAuth,  async (req, res) => {
+router.patch("/approve/:id", accessAuth, async (req, res) => {
   try {
     const post = await CMSContent.findByIdAndUpdate(
       req.params.id,
@@ -737,23 +737,23 @@ router.patch("/approve/:id",   accessAuth,  async (req, res) => {
     if (!post) return res.status(404).json({ message: "Post not found" });
 
     // 🔥 ACTIVITY LOG: CMS APPROVE
-const ip =
-  req.headers["x-forwarded-for"]?.split(",")[0] ||
-  req.socket.remoteAddress;
+    const ip =
+      req.headers["x-forwarded-for"]?.split(",")[0] ||
+      req.socket.remoteAddress;
 
-await Activity.create({
- userId: req.user.id,           // 🔥 REQUIRED
-userName: req.user.email,     // or req.user.name if you want
-role: req.user.role,          // 🔥 REQUIRED BY SCHEMA
+    await Activity.create({
+      userId: req.user.id,           // 🔥 REQUIRED
+      userName: req.user.email,     // or req.user.name if you want
+      role: req.user.role,          // 🔥 REQUIRED BY SCHEMA
 
-  action: "CMS_APPROVED",
-  meta: {
-    cmsId: post._id,
-    title: post.title,
-  },
-  ip,
-  timestamp: new Date(),
-});
+      action: "CMS_APPROVED",
+      meta: {
+        cmsId: post._id,
+        title: post.title,
+      },
+      ip,
+      timestamp: new Date(),
+    });
 
     console.log("✅ Post Approved:", post._id);
     res.json({ success: true, post });
@@ -762,7 +762,7 @@ role: req.user.role,          // 🔥 REQUIRED BY SCHEMA
   }
 });
 
-router.patch("/reject/:id",   accessAuth,  async (req, res) => {
+router.patch("/reject/:id", accessAuth, async (req, res) => {
   try {
     const { reason } = req.body;
     const post = await CMSContent.findByIdAndUpdate(
@@ -777,24 +777,24 @@ router.patch("/reject/:id",   accessAuth,  async (req, res) => {
     if (!post) return res.status(404).json({ message: "Post not found" });
 
     // 🔥 ACTIVITY LOG: CMS REJECT
-const ip =
-  req.headers["x-forwarded-for"]?.split(",")[0] ||
-  req.socket.remoteAddress;
+    const ip =
+      req.headers["x-forwarded-for"]?.split(",")[0] ||
+      req.socket.remoteAddress;
 
-await Activity.create({
- userId: req.user.id,           // 🔥 REQUIRED
-userName: req.user.email,     // or req.user.name if you want
-role: req.user.role,          // 🔥 REQUIRED BY SCHEMA
+    await Activity.create({
+      userId: req.user.id,           // 🔥 REQUIRED
+      userName: req.user.email,     // or req.user.name if you want
+      role: req.user.role,          // 🔥 REQUIRED BY SCHEMA
 
-  action: "CMS_REJECTED",
-  meta: {
-    cmsId: post._id,
-    title: post.title,
-    reason: post.rejectionReason,
-  },
-  ip,
-  timestamp: new Date(),
-});
+      action: "CMS_REJECTED",
+      meta: {
+        cmsId: post._id,
+        title: post.title,
+        reason: post.rejectionReason,
+      },
+      ip,
+      timestamp: new Date(),
+    });
 
     console.log("❌ Post Rejected:", post._id);
     res.json({ success: true, post });
@@ -922,41 +922,74 @@ router.put("/update/:id", accessAuth, upload.any(), async (req, res) => {
     /* ===============================
        GRID / CAROUSEL UPDATE
     =============================== */
-    if (imageFiles.length > 1) {
-      const titles = JSON.parse(req.body.titles || "[]");
-      const descriptions = JSON.parse(req.body.descriptions || "[]");
-      const metaTags = JSON.parse(req.body.metaTags || "[]");
-      const metaDescriptions = JSON.parse(req.body.metaDescriptions || "[]");
-      const keywords = JSON.parse(req.body.imageKeywords || "[]");
-
-      existing.mediaGroup = await Promise.all(
-        imageFiles.map(async (file, i) => ({
-          imageUrl: await uploadToS3(file, existing.displayTo),
-          title: titles[i] || "",
-          description: descriptions[i] || "",
-          metaTag: metaTags[i] || "",
-          metaDescription: metaDescriptions[i] || "",
-          keywords: keywords[i] || "",
-          order: i + 1,
-          style: existing.bannerStyle || {},
-        }))
-      );
-    }
-
     /* ===============================
-       KEEP EXISTING FILES (NO REUPLOAD)
-    =============================== */
-    if (!files.length && req.body.existingFiles) {
-      const urls = Array.isArray(req.body.existingFiles)
-        ? req.body.existingFiles
-        : [req.body.existingFiles];
+     GRID / CAROUSEL UPDATE (FIXED)
+  =============================== */
+  /* ===============================
+   GRID / CAROUSEL UPDATE (FINAL CLEAN)
+=============================== */
 
-      existing.mediaGroup = urls.map((url, i) => ({
-        imageUrl: url,
-        order: i + 1,
-        style: existing.bannerStyle || {},
-      }));
+if (
+  ["women-4grid", "men-4grid", "women-grid", "men-grid", "home-banner-carousel"]
+    .includes(existing.displayTo)
+) {
+  const titles = JSON.parse(req.body.titles || "[]");
+  const descriptions = JSON.parse(req.body.descriptions || "[]");
+  const metaTags = JSON.parse(req.body.metaTags || "[]");
+  const metaDescriptions = JSON.parse(req.body.metaDescriptions || "[]");
+  const keywords = JSON.parse(req.body.imageKeywords || "[]");
+
+  const existingFiles = Array.isArray(req.body.existingFiles)
+    ? req.body.existingFiles
+    : req.body.existingFiles
+    ? [req.body.existingFiles]
+    : [];
+
+  const orders = Array.isArray(req.body.orders)
+    ? req.body.orders
+    : req.body.orders
+    ? [req.body.orders]
+    : [];
+
+  let newMediaGroup = [];
+  let filePointer = 0;
+
+  for (let i = 0; i < orders.length; i++) {
+    let imageUrl = null;
+
+    // Use existing image first
+    if (existingFiles[i]) {
+      imageUrl = existingFiles[i];
     }
+
+    // Replace with new upload if exists
+    if (imageFiles[filePointer]) {
+      imageUrl = await uploadToS3(
+        imageFiles[filePointer],
+        existing.displayTo
+      );
+      filePointer++;
+    }
+
+    if (!imageUrl) continue;
+
+    newMediaGroup.push({
+      imageUrl,
+      title: titles[i] || "",
+      description: descriptions[i] || "",
+      metaTag: metaTags[i] || "",
+      metaDescription: metaDescriptions[i] || "",
+      keywords: keywords[i] || "",
+      order: Number(orders[i]) || i + 1,
+      style: existing.bannerStyle || {},
+    });
+  }
+
+  if (newMediaGroup.length > 0) {
+    existing.mediaGroup = newMediaGroup;
+  }
+}
+
 
     // 🔔 CMS SCHEDULING NOTIFICATION
 
@@ -974,21 +1007,21 @@ router.put("/update/:id", accessAuth, upload.any(), async (req, res) => {
       });
     }
     await Activity.create({
- userId: req.user.id,           // 🔥 REQUIRED
-userName: req.user.email,     // or req.user.name if you want
-role: req.user.role,          // 🔥 REQUIRED BY SCHEMA
+      userId: req.user.id,           // 🔥 REQUIRED
+      userName: req.user.email,     // or req.user.name if you want
+      role: req.user.role,          // 🔥 REQUIRED BY SCHEMA
 
-  action: "CMS_SCHEDULED",
-  meta: {
-    cmsId: existing._id,
-    title: existing.title,
-    visibleAt: existing.visibleAt,
-  },
-  ip:
-    req.headers["x-forwarded-for"]?.split(",")[0] ||
-    req.socket.remoteAddress,
-  timestamp: new Date(),
-});
+      action: "CMS_SCHEDULED",
+      meta: {
+        cmsId: existing._id,
+        title: existing.title,
+        visibleAt: existing.visibleAt,
+      },
+      ip:
+        req.headers["x-forwarded-for"]?.split(",")[0] ||
+        req.socket.remoteAddress,
+      timestamp: new Date(),
+    });
 
 
     if (prevStatus === "Scheduled" && existing.status !== "Scheduled") {
@@ -1001,20 +1034,20 @@ role: req.user.role,          // 🔥 REQUIRED BY SCHEMA
     }
 
     await Activity.create({
-  userId: req.user.id,           // 🔥 REQUIRED
-userName: req.user.email,     // or req.user.name if you want
-role: req.user.role,          // 🔥 REQUIRED BY SCHEMA
+      userId: req.user.id,           // 🔥 REQUIRED
+      userName: req.user.email,     // or req.user.name if you want
+      role: req.user.role,          // 🔥 REQUIRED BY SCHEMA
 
-  action: "CMS_UNSCHEDULED",
-  meta: {
-    cmsId: existing._id,
-    title: existing.title,
-  },
-  ip:
-    req.headers["x-forwarded-for"]?.split(",")[0] ||
-    req.socket.remoteAddress,
-  timestamp: new Date(),
-});
+      action: "CMS_UNSCHEDULED",
+      meta: {
+        cmsId: existing._id,
+        title: existing.title,
+      },
+      ip:
+        req.headers["x-forwarded-for"]?.split(",")[0] ||
+        req.socket.remoteAddress,
+      timestamp: new Date(),
+    });
 
     res.json({ success: true, updated: existing });
   } catch (err) {
@@ -1023,7 +1056,7 @@ role: req.user.role,          // 🔥 REQUIRED BY SCHEMA
   }
 });
 
-router.delete("/delete/:id",  accessAuth,  async (req, res) => {
+router.delete("/delete/:id", accessAuth, async (req, res) => {
   try {
     const deleted = await CMSContent.findByIdAndDelete(req.params.id);
 
@@ -1032,23 +1065,23 @@ router.delete("/delete/:id",  accessAuth,  async (req, res) => {
     }
 
     // 🔥 ACTIVITY LOG: CMS DELETE
-const ip =
-  req.headers["x-forwarded-for"]?.split(",")[0] ||
-  req.socket.remoteAddress;
+    const ip =
+      req.headers["x-forwarded-for"]?.split(",")[0] ||
+      req.socket.remoteAddress;
 
-await Activity.create({
-  userId: req.user.id,           // 🔥 REQUIRED
-userName: req.user.email,     // or req.user.name if you want
-role: req.user.role,          // 🔥 REQUIRED BY SCHEMA
-  action: "CMS_DELETED",
-  meta: {
-    cmsId: deleted._id,
-    title: deleted.title,
-    displayTo: deleted.displayTo,
-  },
-  ip,
-  timestamp: new Date(),
-});
+    await Activity.create({
+      userId: req.user.id,           // 🔥 REQUIRED
+      userName: req.user.email,     // or req.user.name if you want
+      role: req.user.role,          // 🔥 REQUIRED BY SCHEMA
+      action: "CMS_DELETED",
+      meta: {
+        cmsId: deleted._id,
+        title: deleted.title,
+        displayTo: deleted.displayTo,
+      },
+      ip,
+      timestamp: new Date(),
+    });
 
     res.json({ success: true, message: "Deleted successfully" });
   } catch (err) {
