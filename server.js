@@ -122,29 +122,8 @@ app.use((req, res, next) => {
 // CORS
 // ----------------------------
 const allowedOrigins = [
-  "http://localhost:3000",
-  "http://192.168.0.110:3000",
-  "http://192.168.0.110",
-  "http://192.168.0.226:3000",
-  "http://192.168.0.226:3001",
-  "http://localhost:3001",
-  "http://192.168.0.215:3001",
-  "http://192.168.0.110:3001",
   process.env.FRONTEND_URL,
-  "https://kzarre-frontend.vercel.app",
-  "https://kzarre-admin.vercel.app",
-  "https://app.kzarre.com",
-  "https://admin.kzarre.com",
-   "http://kzarre.local:3000",
-   "http://kzarre.local:3001",
-   "https://kzarre-admin.vercel.app",
-   "https://0jvrs0g4-3000.inc1.devtunnels.ms",
-   "http://13.60.212.51:5500",
-   "http://13.60.212.51:3000",
-   "http://13.60.212.51:3001",
-   "http://13.60.212.51",
-   "http://kzarre-aws.duckdns.org",
-   "ss"
+  process.env.ADMIN_URL,
 ];
 
 app.use(
